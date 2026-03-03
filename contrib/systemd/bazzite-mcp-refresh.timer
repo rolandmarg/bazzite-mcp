@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh bazzite-mcp docs cache weekly
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

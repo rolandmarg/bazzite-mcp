@@ -148,14 +148,51 @@ The server enforces the official 6-tier hierarchy from [docs.bazzite.gg](https:/
 5. **AppImage** — Portable apps from trusted sources.
 6. **rpm-ostree** — Last resort. Can freeze updates and block rebasing.
 
+## MCP Resources
+
+Resources provide read-only context that agents can query without calling tools:
+
+| URI | Description |
+|-----|-------------|
+| `bazzite://system/overview` | Current OS, kernel, desktop, hardware |
+| `bazzite://install/hierarchy` | Full 6-tier install hierarchy with explanations |
+| `bazzite://docs/index` | Index of all cached documentation pages |
+| `bazzite://server/info` | Server config and cache status |
+
+## Auto-Refresh (Optional)
+
+A systemd user timer can keep the docs cache fresh automatically:
+
+```bash
+cp contrib/systemd/bazzite-mcp-refresh.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now bazzite-mcp-refresh.timer
+```
+
+Manual refresh: call the `refresh_docs_cache` tool, or run directly:
+
+```bash
+uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.refresh
+```
+
 ## Configuration
 
-Environment variables for the self-improvement tools:
+Optional config file at `~/.config/bazzite-mcp/config.toml`:
+
+```toml
+repo_slug = "rolandmarg/bazzite-mcp"
+cache_ttl_days = 7
+crawl_max_pages = 100
+```
+
+Environment variable overrides:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BAZZITE_MCP_REPO` | `rolandmarg/bazzite-mcp` | GitHub repo slug for issues/PRs |
 | `BAZZITE_MCP_LOCAL` | Auto-detected from package path | Local repo path for source reading |
+| `BAZZITE_MCP_CACHE_TTL` | `7` | Cache TTL in days |
+| `BAZZITE_MCP_CRAWL_MAX` | `100` | Max pages to crawl |
 
 ## Development
 

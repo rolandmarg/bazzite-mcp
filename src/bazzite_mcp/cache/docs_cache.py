@@ -1,9 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+from bazzite_mcp.config import load_config
 from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
-
-
-CACHE_TTL_DAYS = 7
 
 
 class DocsCache:
@@ -57,7 +55,7 @@ class DocsCache:
         oldest = datetime.fromisoformat(oldest_raw)
         if oldest.tzinfo is None:
             oldest = oldest.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc) - oldest > timedelta(days=CACHE_TTL_DAYS)
+        return datetime.now(timezone.utc) - oldest > timedelta(days=load_config().cache_ttl_days)
 
     def clear(self) -> None:
         self._conn.execute("DELETE FROM pages")

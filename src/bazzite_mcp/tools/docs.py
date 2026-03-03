@@ -1,23 +1,60 @@
+import re
+from urllib.parse import urljoin, urlparse
+
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from bazzite_mcp.cache.docs_cache import DocsCache
+from bazzite_mcp.config import load_config
 
 
-DOCS_BASE = "https://docs.bazzite.gg"
-GITHUB_API = "https://api.github.com/repos/ublue-os/bazzite/releases"
+def _extract_content(soup: BeautifulSoup) -> str | None:
+    """Extract main content with multiple fallback selectors."""
+    # mkdocs-material selectors (most likely for docs.bazzite.gg)
+    selectors = [
+        ("article", {}),
+        (None, {"class_": "md-content"}),
+        (None, {"class_": "md-content__inner"}),
+        ("main", {}),
+        (None, {"role": "main"}),
+        (None, {"id": "content"}),
+    ]
+    for tag, attrs in selectors:
+        el = soup.find(tag, **attrs) if tag else soup.find(**attrs)
+        if el and isinstance(el, Tag):
+            text = el.get_text(separator="\n", strip=True)
+            if len(text) > 50:  # skip near-empty matches
+                return text
 
-DOC_PAGES = [
-    "/",
-    "/Installing_and_Managing_Software/",
-    "/Installing_and_Managing_Software/Flatpak/",
-    "/Installing_and_Managing_Software/Homebrew/",
-    "/Installing_and_Managing_Software/rpm-ostree/",
-    "/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/",
-    "/General/",
-    "/Advanced/",
-    "/FAQ/",
-]
+    # Last resort: extract body minus nav/header/footer
+    body = soup.find("body")
+    if body and isinstance(body, Tag):
+        for unwanted in body.find_all(["nav", "header", "footer", "script", "style"]):
+            unwanted.decompose()
+        text = body.get_text(separator="\n", strip=True)
+        if len(text) > 50:
+            return text
+
+    return None
+
+
+def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
+    """Find all internal doc links on a page."""
+    cfg = load_config()
+    parsed_base = urlparse(cfg.docs_base_url)
+    links: set[str] = set()
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        full_url = urljoin(base_url, href)
+        parsed = urlparse(full_url)
+        # Only follow links within docs.bazzite.gg, skip anchors/external
+        if parsed.netloc == parsed_base.netloc and not parsed.fragment:
+            # Normalize: strip query params, ensure trailing slash for dirs
+            clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            if not clean.endswith("/") and "." not in parsed.path.split("/")[-1]:
+                clean += "/"
+            links.add(clean)
+    return links
 
 
 def query_bazzite_docs(query: str) -> str:
@@ -47,6 +84,7 @@ def query_bazzite_docs(query: str) -> str:
 
 def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
     """Get Bazzite release changelog from cache or GitHub API."""
+    cfg = load_config()
     cache = DocsCache()
     entries = cache.get_changelog(version=version, limit=count)
     if entries:
@@ -56,10 +94,10 @@ def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
         )
 
     try:
-        response = httpx.get(GITHUB_API, params={"per_page": count}, timeout=15)
+        response = httpx.get(cfg.github_releases_url, params={"per_page": count}, timeout=15)
         response.raise_for_status()
         releases = response.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Failed to fetch changelogs: {exc}"
 
     parts: list[str] = []
@@ -113,35 +151,65 @@ def install_policy(app_type: str) -> str:
 
 
 def refresh_docs_cache() -> str:
-    """Refresh cached docs pages and changelogs."""
+    """Crawl docs.bazzite.gg recursively and refresh the local cache.
+
+    Discovers all pages by following internal links starting from the homepage.
+    Also fetches recent changelogs from GitHub releases.
+    Uses multiple CSS selector fallbacks for robust content extraction.
+    """
+    cfg = load_config()
     cache = DocsCache()
     cache.clear()
 
     fetched = 0
     errors: list[str] = []
+    visited: set[str] = set()
+    to_visit: set[str] = {cfg.docs_base_url + "/"}
+    max_pages = cfg.crawl_max_pages
 
-    for path in DOC_PAGES:
-        url = f"{DOCS_BASE}{path}"
-        try:
-            response = httpx.get(url, timeout=15, follow_redirects=True)
-            response.raise_for_status()
+    client = httpx.Client(timeout=15, follow_redirects=True)
+    try:
+        while to_visit and fetched < max_pages:
+            url = to_visit.pop()
+            if url in visited:
+                continue
+            visited.add(url)
+
+            try:
+                response = client.get(url)
+                response.raise_for_status()
+            except Exception as exc:
+                errors.append(f"{url}: {exc}")
+                continue
+
             soup = BeautifulSoup(response.text, "html.parser")
-            article = soup.find("article") or soup.find(class_="md-content")
-            if article is None:
-                errors.append(f"{url}: no article content found")
+
+            # Discover more links before extracting content
+            new_links = _discover_doc_links(soup, url)
+            to_visit.update(new_links - visited)
+
+            # Extract content
+            content = _extract_content(soup)
+            if not content:
+                errors.append(f"{url}: no extractable content")
                 continue
 
             title_tag = soup.find("title")
-            title = title_tag.get_text(strip=True) if title_tag else path
-            content = article.get_text(separator="\n", strip=True)
-            section = path.strip("/") or "Home"
+            title = title_tag.get_text(strip=True) if title_tag else url
+
+            # Derive section from URL path
+            parsed = urlparse(url)
+            path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+            section = "/".join(path_parts) if path_parts else "Home"
+
             cache.store_page(url=url, title=title, content=content, section=section)
             fetched += 1
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{url}: {exc}")
+    finally:
+        client.close()
 
+    # Fetch changelogs from GitHub
     try:
-        response = httpx.get(GITHUB_API, params={"per_page": 10}, timeout=15)
+        response = httpx.get(cfg.github_releases_url, params={"per_page": 10}, timeout=15)
         response.raise_for_status()
         for release in response.json():
             cache.store_changelog(
@@ -149,10 +217,11 @@ def refresh_docs_cache() -> str:
                 release.get("published_at", ""),
                 release.get("body", ""),
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         errors.append(f"GitHub releases: {exc}")
 
-    report = f"Refreshed docs cache: {fetched} pages fetched."
+    report = f"Refreshed docs cache: {fetched} pages crawled (max {max_pages})."
     if errors:
         report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(f"  - {err}" for err in errors)
+    report += f"\nSkipped {len(visited) - fetched} pages (no content or errors)."
     return report

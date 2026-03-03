@@ -1,5 +1,11 @@
 from fastmcp import FastMCP
 
+from bazzite_mcp.resources import (
+    get_docs_index,
+    get_install_hierarchy,
+    get_server_info,
+    get_system_overview,
+)
 from bazzite_mcp.tools.audit_tools import audit_log_query, rollback_action
 from bazzite_mcp.tools.containers import (
     create_distrobox,
@@ -126,3 +132,9 @@ mcp.tool(contribute_fix)
 mcp.tool(list_improvements)
 mcp.tool(list_pending_prs)
 mcp.tool(get_server_source)
+
+# MCP Resources — read-only context
+mcp.resource("bazzite://system/overview")(get_system_overview)
+mcp.resource("bazzite://install/hierarchy")(get_install_hierarchy)
+mcp.resource("bazzite://docs/index")(get_docs_index)
+mcp.resource("bazzite://server/info")(get_server_info)

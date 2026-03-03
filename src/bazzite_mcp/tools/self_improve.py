@@ -1,16 +1,16 @@
-import os
 from pathlib import Path
 import shlex
 
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.config import load_config
+from bazzite_mcp.runner import run_audited, run_command
 
 
 def _repo_slug() -> str:
-    return os.environ.get("BAZZITE_MCP_REPO", "rolandmarg/bazzite-mcp")
+    return load_config().repo_slug
 
 
 def _repo_local() -> str:
-    return os.environ.get("BAZZITE_MCP_LOCAL", str(Path(__file__).resolve().parents[2]))
+    return load_config().repo_local
 
 
 def suggest_improvement(
@@ -38,7 +38,11 @@ def suggest_improvement(
         f"--body {shlex.quote(body)} "
         f"--label {shlex.quote(label_str)} 2>&1"
     )
-    result = run_command(cmd)
+    result = run_audited(
+        cmd,
+        tool="suggest_improvement",
+        args={"title": title, "category": category},
+    )
     if result.returncode != 0:
         return (
             "Could not create GitHub issue "
@@ -60,7 +64,11 @@ def contribute_fix(branch_name: str, description: str, files_changed: str) -> st
     """Create branch, commit selected files, push, and open PR."""
     repo = shlex.quote(_repo_local())
 
-    create_branch = run_command(f"git -C {repo} checkout -b {shlex.quote(branch_name)}")
+    create_branch = run_audited(
+        f"git -C {repo} checkout -b {shlex.quote(branch_name)}",
+        tool="contribute_fix",
+        args={"branch": branch_name, "description": description[:100]},
+    )
     if create_branch.returncode != 0:
         return f"Failed to create branch: {create_branch.stderr}"
 
