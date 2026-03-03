@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rpm-ostree status:*)",
+      "WebFetch(domain:docs.bazzite.gg)"
+    ]
+  }
+}
