@@ -1,4 +1,4 @@
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.runner import run_audited, run_command
 
 
 INSTALL_POLICY = """Bazzite 6-tier install hierarchy (official docs.bazzite.gg):
@@ -54,10 +54,20 @@ def _install_with_method(package: str, method: str) -> str:
         "rpm-ostree": f"rpm-ostree install {package}",
         "ujust": f"ujust {package}",
     }
+    rollback_commands = {
+        "flatpak": f"flatpak uninstall -y {package}",
+        "brew": f"brew uninstall {package}",
+        "rpm-ostree": f"rpm-ostree uninstall {package}",
+    }
     if method not in method_commands:
         return f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
 
-    result = run_command(method_commands[method])
+    result = run_audited(
+        method_commands[method],
+        tool="install_package",
+        args={"package": package, "method": method},
+        rollback=rollback_commands.get(method),
+    )
     output = result.stdout
     if result.stderr:
         output += f"\n{result.stderr}"
@@ -73,10 +83,20 @@ def remove_package(package: str, method: str) -> str:
         "brew": f"brew uninstall {package}",
         "rpm-ostree": f"rpm-ostree uninstall {package}",
     }
+    reinstall_commands = {
+        "flatpak": f"flatpak install -y flathub {package}",
+        "brew": f"brew install {package}",
+        "rpm-ostree": f"rpm-ostree install {package}",
+    }
     if method not in method_commands:
         return f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
 
-    result = run_command(method_commands[method])
+    result = run_audited(
+        method_commands[method],
+        tool="remove_package",
+        args={"package": package, "method": method},
+        rollback=reinstall_commands.get(method),
+    )
     output = result.stdout
     if result.returncode != 0:
         output = f"Removal failed (exit {result.returncode}):\n{output}\n{result.stderr}"
@@ -135,12 +155,12 @@ def list_packages(source: str | None = None) -> str:
 def update_packages(source: str | None = None) -> str:
     """Update packages by source."""
     if source in (None, "system"):
-        result = run_command("ujust update")
+        result = run_audited("ujust update", tool="update_packages", args={"source": "system"})
         return f"System update:\n{result.stdout}"
     if source == "flatpak":
-        result = run_command("flatpak update -y")
+        result = run_audited("flatpak update -y", tool="update_packages", args={"source": "flatpak"})
         return f"Flatpak update:\n{result.stdout}"
     if source == "brew":
-        result = run_command("brew upgrade")
+        result = run_audited("brew upgrade", tool="update_packages", args={"source": "brew"})
         return f"Brew update:\n{result.stdout}"
     return f"Unknown source '{source}'. Supported: flatpak, brew, system, all."

@@ -1,4 +1,4 @@
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.runner import run_audited, run_command
 
 
 def ujust_list(filter: str | None = None) -> str:
@@ -27,7 +27,11 @@ def ujust_run(command: str) -> str:
     ujust is Bazzite's built-in command runner for system setup, configuration,
     and maintenance. It is the first method to check for system operations.
     """
-    result = run_command(f"ujust {command}")
+    result = run_audited(
+        f"ujust {command}",
+        tool="ujust_run",
+        args={"command": command},
+    )
     output = result.stdout
     if result.stderr:
         output += f"\nSTDERR: {result.stderr}"

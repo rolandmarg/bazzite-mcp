@@ -1,4 +1,4 @@
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.runner import run_audited, run_command
 
 
 def manage_service(name: str, action: str, user: bool = False) -> str:
@@ -16,7 +16,16 @@ def manage_service(name: str, action: str, user: bool = False) -> str:
         return f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}."
 
     scope = "--user" if user else ""
-    result = run_command(f"systemctl {scope} {action} {name}")
+    # Determine rollback action
+    reverse = {"start": "stop", "stop": "start", "enable": "disable", "disable": "enable",
+                "enable --now": "disable --now", "disable --now": "enable --now"}.get(action)
+    rollback_cmd = f"systemctl {scope} {reverse} {name}" if reverse else None
+    result = run_audited(
+        f"systemctl {scope} {action} {name}",
+        tool="manage_service",
+        args={"name": name, "action": action, "user": user},
+        rollback=rollback_cmd,
+    )
     if result.returncode != 0:
         return f"Failed to {action} {name}: {result.stderr}"
     return f"Service '{name}' {action} successful."
@@ -70,9 +79,17 @@ def manage_connection(
     if action == "show":
         result = run_command("nmcli connection show")
     elif action in ("up", "down", "delete") and name:
-        result = run_command(f'nmcli connection {action} "{name}"')
+        result = run_audited(
+            f'nmcli connection {action} "{name}"',
+            tool="manage_connection",
+            args={"action": action, "name": name},
+        )
     elif action == "modify" and name and properties:
-        result = run_command(f'nmcli connection modify "{name}" {properties}')
+        result = run_audited(
+            f'nmcli connection modify "{name}" {properties}',
+            tool="manage_connection",
+            args={"action": action, "name": name, "properties": properties},
+        )
     else:
         return "Usage: action='show|up|down|delete|modify', name=<connection>, properties=<nmcli args for modify>"
 
@@ -88,20 +105,32 @@ def manage_firewall(
     if action == "list":
         result = run_command("firewall-cmd --list-all")
     elif action == "add-port" and port:
-        result = run_command(
-            f"sudo firewall-cmd --add-port={port} --permanent && sudo firewall-cmd --reload"
+        result = run_audited(
+            f"sudo firewall-cmd --add-port={port} --permanent && sudo firewall-cmd --reload",
+            tool="manage_firewall",
+            args={"action": action, "port": port},
+            rollback=f"sudo firewall-cmd --remove-port={port} --permanent && sudo firewall-cmd --reload",
         )
     elif action == "remove-port" and port:
-        result = run_command(
-            f"sudo firewall-cmd --remove-port={port} --permanent && sudo firewall-cmd --reload"
+        result = run_audited(
+            f"sudo firewall-cmd --remove-port={port} --permanent && sudo firewall-cmd --reload",
+            tool="manage_firewall",
+            args={"action": action, "port": port},
+            rollback=f"sudo firewall-cmd --add-port={port} --permanent && sudo firewall-cmd --reload",
         )
     elif action == "add-service" and service:
-        result = run_command(
-            f"sudo firewall-cmd --add-service={service} --permanent && sudo firewall-cmd --reload"
+        result = run_audited(
+            f"sudo firewall-cmd --add-service={service} --permanent && sudo firewall-cmd --reload",
+            tool="manage_firewall",
+            args={"action": action, "service": service},
+            rollback=f"sudo firewall-cmd --remove-service={service} --permanent && sudo firewall-cmd --reload",
         )
     elif action == "remove-service" and service:
-        result = run_command(
-            f"sudo firewall-cmd --remove-service={service} --permanent && sudo firewall-cmd --reload"
+        result = run_audited(
+            f"sudo firewall-cmd --remove-service={service} --permanent && sudo firewall-cmd --reload",
+            tool="manage_firewall",
+            args={"action": action, "service": service},
+            rollback=f"sudo firewall-cmd --add-service={service} --permanent && sudo firewall-cmd --reload",
         )
     else:
         return "Usage: action='list|add-port|remove-port|add-service|remove-service'"
@@ -119,6 +148,14 @@ def manage_tailscale(action: str) -> str:
         result = run_command("tailscale status")
     elif action == "ip":
         result = run_command("tailscale ip")
+    elif action in ("up", "down"):
+        reverse = "down" if action == "up" else "up"
+        result = run_audited(
+            f"tailscale {action}",
+            tool="manage_tailscale",
+            args={"action": action},
+            rollback=f"tailscale {reverse}",
+        )
     else:
         result = run_command(f"tailscale {action}")
 

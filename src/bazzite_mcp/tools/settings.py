@@ -1,4 +1,4 @@
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.runner import run_audited, run_command
 
 
 def set_theme(mode: str) -> str:
@@ -12,8 +12,11 @@ def set_theme(mode: str) -> str:
         return f"Unknown mode '{mode}'. Supported: dark, light, auto."
 
     scheme = schemes[mode]
-    result = run_command(
-        f"gsettings set org.gnome.desktop.interface color-scheme '{scheme}'"
+    result = run_audited(
+        f"gsettings set org.gnome.desktop.interface color-scheme '{scheme}'",
+        tool="set_theme",
+        args={"mode": mode},
+        rollback=f"gsettings set org.gnome.desktop.interface color-scheme 'default'",
     )
     if result.returncode != 0:
         return f"Failed to set theme: {result.stderr}"
@@ -26,7 +29,11 @@ def set_audio_output(device: str | None = None) -> str:
         result = run_command("pactl list sinks short")
         return f"Available audio outputs:\n{result.stdout}\n\nUse sink name or index to switch."
 
-    result = run_command(f"pactl set-default-sink {device}")
+    result = run_audited(
+        f"pactl set-default-sink {device}",
+        tool="set_audio_output",
+        args={"device": device},
+    )
     if result.returncode != 0:
         return f"Failed to switch audio: {result.stderr}"
     return f"Audio output switched to: {device}"
@@ -48,8 +55,10 @@ def set_display_config(
 ) -> str:
     """Change display resolution, refresh rate, or scaling."""
     if scale:
-        result = run_command(
-            f"gsettings set org.gnome.desktop.interface text-scaling-factor {scale}"
+        result = run_audited(
+            f"gsettings set org.gnome.desktop.interface text-scaling-factor {scale}",
+            tool="set_display_config",
+            args={"output": output, "scale": scale},
         )
         if result.returncode != 0:
             return f"Failed to set scale: {result.stderr}"
@@ -61,14 +70,22 @@ def set_display_config(
         cmd += f" --rate {refresh}"
 
     if resolution or refresh:
-        result = run_command(cmd)
+        result = run_audited(
+            cmd,
+            tool="set_display_config",
+            args={"output": output, "resolution": resolution, "refresh": refresh},
+        )
         if result.returncode != 0:
             fallback = f"xrandr --output {output}"
             if resolution:
                 fallback += f" --mode {resolution}"
             if refresh:
                 fallback += f" --rate {refresh}"
-            result = run_command(fallback)
+            result = run_audited(
+                fallback,
+                tool="set_display_config",
+                args={"output": output, "resolution": resolution, "refresh": refresh, "via": "xrandr"},
+            )
             if result.returncode != 0:
                 return f"Failed to set display config: {result.stderr}"
 
@@ -84,7 +101,11 @@ def set_power_profile(profile: str) -> str:
     if profile not in valid:
         return f"Unknown profile '{profile}'. Supported: {', '.join(valid)}."
 
-    result = run_command(f"powerprofilesctl set {profile}")
+    result = run_audited(
+        f"powerprofilesctl set {profile}",
+        tool="set_power_profile",
+        args={"profile": profile},
+    )
     if result.returncode != 0:
         return f"Failed to set power profile: {result.stderr}"
     return f"Power profile set to: {profile}"
@@ -100,7 +121,11 @@ def get_settings(schema: str, key: str) -> str:
 
 def set_settings(schema: str, key: str, value: str) -> str:
     """Write a gsettings value."""
-    result = run_command(f"gsettings set {schema} {key} {value}")
+    result = run_audited(
+        f"gsettings set {schema} {key} {value}",
+        tool="set_settings",
+        args={"schema": schema, "key": key, "value": value},
+    )
     if result.returncode != 0:
         return f"Error setting {schema} {key}: {result.stderr}"
     return f"Set {schema} {key} = {value}"

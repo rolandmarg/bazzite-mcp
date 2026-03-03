@@ -1,7 +1,7 @@
 [project]
 name = "bazzite-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP server providing AI-native awareness and control of Bazzite OS"
 readme = "README.md"
 authors = [
     { name = "Roland", email = "rmargve@gmail.com" }

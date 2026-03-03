@@ -1,4 +1,4 @@
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.runner import run_audited, run_command
 
 
 DISTROBOX_IMAGES = {
@@ -19,7 +19,12 @@ def create_distrobox(name: str, image: str | None = None) -> str:
     elif not image:
         image = "ubuntu:latest"
 
-    result = run_command(f"distrobox create --name {name} --image {image} --yes")
+    result = run_audited(
+        f"distrobox create --name {name} --image {image} --yes",
+        tool="create_distrobox",
+        args={"name": name, "image": image},
+        rollback=f"distrobox rm --force {name}",
+    )
     if result.returncode != 0:
         return f"Failed to create distrobox '{name}': {result.stderr}"
     return f"Container '{name}' created with image '{image}'.\nEnter with: distrobox enter {name}"
@@ -34,9 +39,17 @@ def manage_distrobox(name: str, action: str) -> str:
             "(MCP tools cannot start interactive shells)"
         )
     if action == "stop":
-        result = run_command(f"distrobox stop --yes {name}")
+        result = run_audited(
+            f"distrobox stop --yes {name}",
+            tool="manage_distrobox",
+            args={"name": name, "action": action},
+        )
     elif action == "remove":
-        result = run_command(f"distrobox rm --force {name}")
+        result = run_audited(
+            f"distrobox rm --force {name}",
+            tool="manage_distrobox",
+            args={"name": name, "action": action},
+        )
     else:
         return f"Unknown action '{action}'. Supported: enter, stop, remove."
 
@@ -60,7 +73,11 @@ def exec_in_distrobox(name: str, command: str) -> str:
 
 def export_distrobox_app(name: str, app: str) -> str:
     """Export a GUI app from distrobox to host menu."""
-    result = run_command(f"distrobox enter {name} -- distrobox-export --app {app}")
+    result = run_audited(
+        f"distrobox enter {name} -- distrobox-export --app {app}",
+        tool="export_distrobox_app",
+        args={"name": name, "app": app},
+    )
     if result.returncode != 0:
         return f"Failed to export '{app}' from '{name}': {result.stderr}"
     return f"Exported '{app}' from container '{name}' to host application menu."
@@ -109,7 +126,14 @@ WantedBy=default.target
 
 def manage_podman(action: str, args: str = "") -> str:
     """Run podman container operations."""
-    result = run_command(f"podman {action} {args}")
+    if action in ("run", "stop", "rm", "pull"):
+        result = run_audited(
+            f"podman {action} {args}",
+            tool="manage_podman",
+            args={"action": action, "args": args},
+        )
+    else:
+        result = run_command(f"podman {action} {args}")
     return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
 
 
@@ -120,9 +144,18 @@ def manage_waydroid(action: str) -> str:
 
     if action in ("status", "start", "stop"):
         if action == "start":
-            result = run_command("waydroid session start")
+            result = run_audited(
+                "waydroid session start",
+                tool="manage_waydroid",
+                args={"action": action},
+                rollback="waydroid session stop",
+            )
         elif action == "stop":
-            result = run_command("waydroid session stop")
+            result = run_audited(
+                "waydroid session stop",
+                tool="manage_waydroid",
+                args={"action": action},
+            )
         else:
             result = run_command("waydroid status")
         return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
