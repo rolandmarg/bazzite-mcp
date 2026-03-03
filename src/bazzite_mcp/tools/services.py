@@ -61,17 +61,20 @@ def network_status() -> str:
     return "\n\n".join(parts)
 
 
-def manage_connection(action: str, name: str | None = None, **kwargs: str) -> str:
+def manage_connection(
+    action: str,
+    name: str | None = None,
+    properties: str | None = None,
+) -> str:
     """Create, modify, or delete NetworkManager connections."""
     if action == "show":
         result = run_command("nmcli connection show")
     elif action in ("up", "down", "delete") and name:
         result = run_command(f'nmcli connection {action} "{name}"')
-    elif action == "modify" and name:
-        props = " ".join(f"{key} {value}" for key, value in kwargs.items())
-        result = run_command(f'nmcli connection modify "{name}" {props}')
+    elif action == "modify" and name and properties:
+        result = run_command(f'nmcli connection modify "{name}" {properties}')
     else:
-        return "Usage: action='show|up|down|delete|modify', name=<connection name>"
+        return "Usage: action='show|up|down|delete|modify', name=<connection>, properties=<nmcli args for modify>"
 
     return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
 
