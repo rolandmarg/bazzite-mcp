@@ -47,8 +47,12 @@ def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
         href = a_tag["href"]
         full_url = urljoin(base_url, href)
         parsed = urlparse(full_url)
-        # Only follow links within docs.bazzite.gg, skip anchors/external
-        if parsed.netloc == parsed_base.netloc and not parsed.fragment:
+        # Only follow links within docs.bazzite.gg, skip anchors/external/CDN
+        if (
+            parsed.netloc == parsed_base.netloc
+            and not parsed.fragment
+            and not parsed.path.startswith("/cdn-cgi/")
+        ):
             # Normalize: strip query params, ensure trailing slash for dirs
             clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
             if not clean.endswith("/") and "." not in parsed.path.split("/")[-1]:
