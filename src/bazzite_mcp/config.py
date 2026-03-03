@@ -27,11 +27,11 @@ class Config:
     github_releases_url: str = "https://api.github.com/repos/ublue-os/bazzite/releases"
     crawl_max_pages: int = 100
 
-    # Embeddings
-    embedding_api_url: str = "https://api.openai.com/v1/embeddings"
-    embedding_model: str = "text-embedding-3-small"
-    embedding_api_key_env: str = "OPENAI_API_KEY"
-    embedding_dimensions: int = 512
+    # Embeddings (provider: "gemini" or "openai")
+    embedding_provider: str = "gemini"
+    embedding_model: str = "gemini-embedding-001"
+    embedding_api_key_env: str = "GEMINI_API_KEY"
+    embedding_dimensions: int = 768
     embedding_chunk_size: int = 2000
 
     # Audit

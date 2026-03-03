@@ -178,21 +178,30 @@ uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.refresh
 
 ## Semantic Search (Optional)
 
-Set an OpenAI-compatible API key to enable meaning-based doc search:
+Set a Gemini API key (free) to enable meaning-based doc search:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+export GEMINI_API_KEY="your-key"  # Get free at https://aistudio.google.com/apikey
 ```
 
 Embeddings are generated during `refresh_docs_cache` and stored locally. Subsequent searches are fast local lookups. Without an API key, `semantic_search_docs` falls back to keyword search.
 
-Supports any OpenAI-compatible endpoint. Configure in `config.toml`:
+Default provider is Gemini (`gemini-embedding-001`, free tier). Also supports OpenAI:
 
 ```toml
-embedding_api_url = "https://api.openai.com/v1/embeddings"
-embedding_model = "text-embedding-3-small"
-embedding_api_key_env = "OPENAI_API_KEY"
-embedding_dimensions = 512
+# ~/.config/bazzite-mcp/config.toml
+
+# Gemini (default, free)
+embedding_provider = "gemini"
+embedding_model = "gemini-embedding-001"
+embedding_api_key_env = "GEMINI_API_KEY"
+embedding_dimensions = 768
+
+# Or OpenAI
+# embedding_provider = "openai"
+# embedding_model = "text-embedding-3-small"
+# embedding_api_key_env = "OPENAI_API_KEY"
+# embedding_dimensions = 512
 ```
 
 ## Configuration

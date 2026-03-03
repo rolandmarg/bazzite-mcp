@@ -1,7 +1,8 @@
 """Cloud-based embedding generation + local vector search.
 
-Embeddings are generated via an OpenAI-compatible API during cache refresh,
-then stored as raw float32 blobs in SQLite for offline semantic search.
+Supports Gemini (free) and OpenAI embedding APIs.
+Embeddings are generated during cache refresh, then stored as raw float32
+blobs in SQLite for offline semantic search.
 """
 
 import os
@@ -54,16 +55,73 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def generate_embeddings(texts: list[str]) -> list[list[float]] | None:
-    """Call the embedding API for a batch of texts. Returns None if unavailable."""
-    api_key = _get_api_key()
-    if not api_key:
+def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | None:
+    """Generate embeddings via Google Gemini REST API (free tier)."""
+    cfg = load_config()
+    model = cfg.embedding_model
+    base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    # Use batchEmbedContents for efficiency
+    requests = []
+    for text in texts:
+        requests.append({
+            "model": f"models/{model}",
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": cfg.embedding_dimensions,
+            "taskType": "RETRIEVAL_DOCUMENT",
+        })
+
+    try:
+        response = httpx.post(
+            f"{base_url}/models/{model}:batchEmbedContents",
+            headers={"Content-Type": "application/json"},
+            params={"key": api_key},
+            json={"requests": requests},
+            timeout=120,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [emb["values"] for emb in data["embeddings"]]
+    except Exception:
         return None
 
+
+def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float]] | None:
+    """Generate query embeddings via Gemini (uses RETRIEVAL_QUERY task type)."""
+    cfg = load_config()
+    model = cfg.embedding_model
+    base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    requests = []
+    for text in texts:
+        requests.append({
+            "model": f"models/{model}",
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": cfg.embedding_dimensions,
+            "taskType": "RETRIEVAL_QUERY",
+        })
+
+    try:
+        response = httpx.post(
+            f"{base_url}/models/{model}:batchEmbedContents",
+            headers={"Content-Type": "application/json"},
+            params={"key": api_key},
+            json={"requests": requests},
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [emb["values"] for emb in data["embeddings"]]
+    except Exception:
+        return None
+
+
+def _embed_openai(texts: list[str], api_key: str) -> list[list[float]] | None:
+    """Generate embeddings via OpenAI-compatible API."""
     cfg = load_config()
     try:
         response = httpx.post(
-            cfg.embedding_api_url,
+            "https://api.openai.com/v1/embeddings",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "input": texts,
@@ -74,11 +132,29 @@ def generate_embeddings(texts: list[str]) -> list[list[float]] | None:
         )
         response.raise_for_status()
         data = response.json()
-        # OpenAI-compatible response: {"data": [{"embedding": [...], "index": 0}, ...]}
         results = sorted(data["data"], key=lambda x: x["index"])
         return [r["embedding"] for r in results]
     except Exception:
         return None
+
+
+def generate_embeddings(texts: list[str], query: bool = False) -> list[list[float]] | None:
+    """Call the configured embedding API. Returns None if unavailable.
+
+    Args:
+        texts: List of texts to embed.
+        query: If True, use query-optimized task type (Gemini only).
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return None
+
+    cfg = load_config()
+    if cfg.embedding_provider == "gemini":
+        if query:
+            return _embed_gemini_query(texts, api_key)
+        return _embed_gemini(texts, api_key)
+    return _embed_openai(texts, api_key)
 
 
 def embed_pages(conn: Connection) -> tuple[int, list[str]]:
@@ -104,7 +180,7 @@ def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     errors: list[str] = []
     embedded = 0
 
-    # Process in batches of 20 (API limit friendly)
+    # Process in batches (Gemini batch limit is 100)
     batch_size = 20
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
@@ -144,12 +220,11 @@ def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
 
     Embeds the query via API, then ranks stored chunks by cosine similarity.
     """
-    query_vecs = generate_embeddings([query])
+    query_vecs = generate_embeddings([query], query=True)
     if query_vecs is None:
         return []
 
     query_vec = query_vecs[0]
-    cfg = load_config()
 
     rows = conn.execute(
         "SELECT e.chunk_text, e.embedding, e.dimensions, p.url, p.title, p.section "
