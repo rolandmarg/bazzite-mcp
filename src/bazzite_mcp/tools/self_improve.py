@@ -1,11 +1,16 @@
+import os
 from pathlib import Path
 import shlex
 
 from bazzite_mcp.runner import run_command
 
 
-REPO = "rolandmarg/bazzite-mcp"
-REPO_LOCAL = "/home/kira/bazzite-mcp"
+def _repo_slug() -> str:
+    return os.environ.get("BAZZITE_MCP_REPO", "rolandmarg/bazzite-mcp")
+
+
+def _repo_local() -> str:
+    return os.environ.get("BAZZITE_MCP_LOCAL", str(Path(__file__).resolve().parents[2]))
 
 
 def suggest_improvement(
@@ -28,7 +33,7 @@ def suggest_improvement(
     )
 
     cmd = (
-        f"gh issue create --repo {shlex.quote(REPO)} "
+        f"gh issue create --repo {shlex.quote(_repo_slug())} "
         f"--title {shlex.quote(title)} "
         f"--body {shlex.quote(body)} "
         f"--label {shlex.quote(label_str)} 2>&1"
@@ -53,7 +58,7 @@ def suggest_improvement(
 
 def contribute_fix(branch_name: str, description: str, files_changed: str) -> str:
     """Create branch, commit selected files, push, and open PR."""
-    repo = shlex.quote(REPO_LOCAL)
+    repo = shlex.quote(_repo_local())
 
     create_branch = run_command(f"git -C {repo} checkout -b {shlex.quote(branch_name)}")
     if create_branch.returncode != 0:
@@ -74,7 +79,7 @@ def contribute_fix(branch_name: str, description: str, files_changed: str) -> st
         return f"Failed to push: {push.stderr}"
 
     pr_cmd = (
-        f"gh pr create --repo {shlex.quote(REPO)} "
+        f"gh pr create --repo {shlex.quote(_repo_slug())} "
         f"--title {shlex.quote(f'feat: {description[:60]}')} "
         f"--body {shlex.quote('## Summary\n\n' + description)} "
         "--base main"
@@ -97,7 +102,7 @@ def contribute_fix(branch_name: str, description: str, files_changed: str) -> st
 def list_improvements(state: str = "open") -> str:
     """List improvement suggestions (issues) for the repository."""
     result = run_command(
-        f"gh issue list --repo {shlex.quote(REPO)} --state {shlex.quote(state)} --limit 20"
+        f"gh issue list --repo {shlex.quote(_repo_slug())} --state {shlex.quote(state)} --limit 20"
     )
     if result.returncode != 0:
         return f"Failed to list issues: {result.stderr}"
@@ -106,7 +111,7 @@ def list_improvements(state: str = "open") -> str:
 
 def list_pending_prs() -> str:
     """List open pull requests for the repository."""
-    result = run_command(f"gh pr list --repo {shlex.quote(REPO)} --state open --limit 20")
+    result = run_command(f"gh pr list --repo {shlex.quote(_repo_slug())} --state open --limit 20")
     if result.returncode != 0:
         return f"Failed to list PRs: {result.stderr}"
     return result.stdout if result.stdout.strip() else "No open PRs."
@@ -114,7 +119,7 @@ def list_pending_prs() -> str:
 
 def get_server_source(file_path: str) -> str:
     """Read source code of a file in the local bazzite-mcp repo."""
-    base = Path(REPO_LOCAL).resolve()
+    base = Path(_repo_local()).resolve()
     target = (base / file_path).resolve()
     try:
         target.relative_to(base)
