@@ -117,10 +117,11 @@ Any client supporting stdio transport can use the same `uv run` command.
 ### Knowledge & Docs
 | Tool | Description |
 |------|-------------|
-| `query_bazzite_docs` | Full-text search cached docs |
+| `query_bazzite_docs` | Full-text keyword search cached docs |
+| `semantic_search_docs` | Semantic similarity search (requires embedding API key) |
 | `bazzite_changelog` | Release changelogs |
 | `install_policy` | Explain recommended install method |
-| `refresh_docs_cache` | Refresh cache from docs.bazzite.gg |
+| `refresh_docs_cache` | Refresh cache from docs.bazzite.gg + generate embeddings |
 
 ### Audit
 | Tool | Description |
@@ -173,6 +174,25 @@ Manual refresh: call the `refresh_docs_cache` tool, or run directly:
 
 ```bash
 uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.refresh
+```
+
+## Semantic Search (Optional)
+
+Set an OpenAI-compatible API key to enable meaning-based doc search:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+Embeddings are generated during `refresh_docs_cache` and stored locally. Subsequent searches are fast local lookups. Without an API key, `semantic_search_docs` falls back to keyword search.
+
+Supports any OpenAI-compatible endpoint. Configure in `config.toml`:
+
+```toml
+embedding_api_url = "https://api.openai.com/v1/embeddings"
+embedding_model = "text-embedding-3-small"
+embedding_api_key_env = "OPENAI_API_KEY"
+embedding_dimensions = 512
 ```
 
 ## Configuration

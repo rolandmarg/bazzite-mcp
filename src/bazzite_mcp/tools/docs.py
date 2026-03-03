@@ -5,6 +5,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 
 from bazzite_mcp.cache.docs_cache import DocsCache
+from bazzite_mcp.cache.embeddings import embed_pages, semantic_search
 from bazzite_mcp.config import load_config
 
 
@@ -84,6 +85,33 @@ def query_bazzite_docs(query: str) -> str:
             f"### {result['title']} ({result['section']})\n{snippet}\nSource: {result['url']}"
         )
     return "\n\n---\n\n".join(parts) + stale_notice
+
+
+def semantic_search_docs(query: str, limit: int = 5) -> str:
+    """Semantic similarity search over cached Bazzite docs.
+
+    Uses embeddings for meaning-based matching (e.g. 'how to run android apps'
+    finds Waydroid docs even without exact keyword match).
+    Requires an embedding API key to be configured.
+    Falls back to FTS5 keyword search if embeddings are unavailable.
+    """
+    cache = DocsCache()
+    if cache.page_count() == 0:
+        return "Docs cache is empty. Run refresh_docs_cache() to populate it."
+
+    results = semantic_search(cache._conn, query, limit=limit)
+    if not results:
+        # Fall back to keyword search
+        return query_bazzite_docs(query)
+
+    parts: list[str] = []
+    for r in results:
+        snippet = r["content"][:500]
+        parts.append(
+            f"### {r['title']} ({r['section']}) [score: {r['score']}]\n"
+            f"{snippet}\nSource: {r['url']}"
+        )
+    return "\n\n---\n\n".join(parts)
 
 
 def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
@@ -224,7 +252,15 @@ def refresh_docs_cache() -> str:
     except Exception as exc:
         errors.append(f"GitHub releases: {exc}")
 
+    # Generate embeddings if API key is available
+    embedded, embed_errors = embed_pages(cache._conn)
+    errors.extend(embed_errors)
+
     report = f"Refreshed docs cache: {fetched} pages crawled (max {max_pages})."
+    if embedded:
+        report += f"\nEmbeddings: {embedded} chunks embedded for semantic search."
+    elif not embed_errors:
+        report += "\nEmbeddings: skipped (no new pages to embed)."
     if errors:
         report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(f"  - {err}" for err in errors)
     report += f"\nSkipped {len(visited) - fetched} pages (no content or errors)."

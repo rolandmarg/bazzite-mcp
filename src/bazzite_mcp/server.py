@@ -22,6 +22,7 @@ from bazzite_mcp.tools.docs import (
     install_policy,
     query_bazzite_docs,
     refresh_docs_cache,
+    semantic_search_docs,
 )
 from bazzite_mcp.tools.packages import (
     install_package,
@@ -118,6 +119,7 @@ mcp.tool(process_list)
 
 # Knowledge and docs
 mcp.tool(query_bazzite_docs)
+mcp.tool(semantic_search_docs)
 mcp.tool(bazzite_changelog)
 mcp.tool(install_policy)
 mcp.tool(refresh_docs_cache)

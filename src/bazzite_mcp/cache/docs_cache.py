@@ -58,6 +58,7 @@ class DocsCache:
         return datetime.now(timezone.utc) - oldest > timedelta(days=load_config().cache_ttl_days)
 
     def clear(self) -> None:
+        self._conn.execute("DELETE FROM embeddings")
         self._conn.execute("DELETE FROM pages")
         self._conn.execute("DELETE FROM pages_fts")
         self._conn.commit()
