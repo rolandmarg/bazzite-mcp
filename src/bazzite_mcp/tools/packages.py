@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import shlex
 from typing import Literal
 
@@ -27,11 +29,16 @@ def install_package(
         return _install_with_method(package, method)
 
     pkg = shlex.quote(package)
-    ujust_check = run_command(
-        f"ujust --summary 2>/dev/null | grep -iE {shlex.quote(f'install.*{package}|setup.*{package}')}"
+    ujust_summary = run_command("ujust --summary 2>/dev/null")
+    ujust_lines = (
+        ujust_summary.stdout.strip().splitlines() if ujust_summary.stdout else []
     )
-    if ujust_check.returncode == 0 and ujust_check.stdout.strip():
-        commands = ujust_check.stdout.strip().split("\n")
+    matcher = re.compile(
+        rf"install.*{re.escape(package)}|setup.*{re.escape(package)}", re.IGNORECASE
+    )
+    matches = [line for line in ujust_lines if matcher.search(line)]
+    if ujust_summary.returncode == 0 and matches:
+        commands = matches
         return (
             f"Found ujust command(s) for '{package}':\n"
             + "\n".join(f"  ujust {cmd.strip()}" for cmd in commands)
@@ -73,7 +80,9 @@ def _install_with_method(package: str, method: str) -> str:
         "rpm-ostree": f"rpm-ostree uninstall {pkg}",
     }
     if method not in method_commands:
-        raise ToolError(f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}")
+        raise ToolError(
+            f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
+        )
 
     result = run_audited(
         method_commands[method],
@@ -89,7 +98,9 @@ def _install_with_method(package: str, method: str) -> str:
     return f"Installed '{package}' via {method}:\n{output}"
 
 
-def remove_package(package: str, method: Literal["flatpak", "brew", "rpm-ostree"]) -> str:
+def remove_package(
+    package: str, method: Literal["flatpak", "brew", "rpm-ostree"]
+) -> str:
     """Remove package via its original install method."""
     pkg = shlex.quote(package)
     method_commands = {
@@ -103,7 +114,9 @@ def remove_package(package: str, method: Literal["flatpak", "brew", "rpm-ostree"
         "rpm-ostree": f"rpm-ostree install {pkg}",
     }
     if method not in method_commands:
-        raise ToolError(f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}")
+        raise ToolError(
+            f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
+        )
 
     result = run_audited(
         method_commands[method],
@@ -112,7 +125,9 @@ def remove_package(package: str, method: Literal["flatpak", "brew", "rpm-ostree"
         rollback=reinstall_commands.get(method),
     )
     if result.returncode != 0:
-        raise ToolError(f"Removal failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}")
+        raise ToolError(
+            f"Removal failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
+        )
     return result.stdout
 
 
@@ -121,9 +136,15 @@ def search_package(package: str) -> str:
     parts: list[str] = []
 
     pkg = shlex.quote(package)
-    ujust_check = run_command(f"ujust --summary 2>/dev/null | grep -i {pkg}")
+    ujust_check = run_command("ujust --summary 2>/dev/null")
     if ujust_check.returncode == 0 and ujust_check.stdout.strip():
-        parts.append(f"[Tier 1 - ujust]\n{ujust_check.stdout}")
+        matching_lines = [
+            line
+            for line in ujust_check.stdout.splitlines()
+            if package.lower() in line.lower()
+        ]
+        if matching_lines:
+            parts.append("[Tier 1 - ujust]\n" + "\n".join(matching_lines))
 
     flatpak_check = run_command(f"flatpak search {pkg} 2>/dev/null")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
@@ -141,13 +162,17 @@ def search_package(package: str) -> str:
     return "\n\n".join(parts) + f"\n\n{INSTALL_POLICY}"
 
 
-def list_packages(source: Literal["flatpak", "brew", "rpm-ostree"] | None = None) -> str:
+def list_packages(
+    source: Literal["flatpak", "brew", "rpm-ostree"] | None = None,
+) -> str:
     """List installed packages by source, or all sources if omitted."""
     parts: list[str] = []
     sources = [source] if source else ["flatpak", "brew", "rpm-ostree"]
 
     if "flatpak" in sources:
-        result = run_command("flatpak list --app --columns=name,application,version 2>/dev/null")
+        result = run_command(
+            "flatpak list --app --columns=name,application,version 2>/dev/null"
+        )
         if result.returncode == 0 and result.stdout.strip():
             parts.append(f"=== Flatpak ===\n{result.stdout}")
 
@@ -157,11 +182,19 @@ def list_packages(source: Literal["flatpak", "brew", "rpm-ostree"] | None = None
             parts.append(f"=== Homebrew ===\n{result.stdout}")
 
     if "rpm-ostree" in sources:
-        result = run_command(
-            "rpm-ostree status --json 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); pkgs=d['deployments'][0].get('requested-packages',[]); print(chr(10).join(pkgs) if pkgs else 'No layered packages')\""
-        )
+        result = run_command("rpm-ostree status --json 2>/dev/null")
         if result.returncode == 0:
-            parts.append(f"=== rpm-ostree (layered) ===\n{result.stdout}")
+            layered = "No layered packages"
+            try:
+                data = json.loads(result.stdout)
+                deployments = data.get("deployments", [])
+                if deployments:
+                    requested = deployments[0].get("requested-packages", [])
+                    if requested:
+                        layered = "\n".join(str(pkg_name) for pkg_name in requested)
+            except json.JSONDecodeError:
+                layered = "Could not parse rpm-ostree status JSON"
+            parts.append(f"=== rpm-ostree (layered) ===\n{layered}")
 
     return "\n\n".join(parts) if parts else "No packages found."
 
@@ -169,12 +202,20 @@ def list_packages(source: Literal["flatpak", "brew", "rpm-ostree"] | None = None
 def update_packages(source: Literal["system", "flatpak", "brew"] | None = None) -> str:
     """Update packages by source, or run full system update if omitted."""
     if source in (None, "system"):
-        result = run_audited("ujust update", tool="update_packages", args={"source": "system"})
+        result = run_audited(
+            "ujust update", tool="update_packages", args={"source": "system"}
+        )
         return f"System update:\n{result.stdout}"
     if source == "flatpak":
-        result = run_audited("flatpak update -y", tool="update_packages", args={"source": "flatpak"})
+        result = run_audited(
+            "flatpak update -y", tool="update_packages", args={"source": "flatpak"}
+        )
         return f"Flatpak update:\n{result.stdout}"
     if source == "brew":
-        result = run_audited("brew upgrade", tool="update_packages", args={"source": "brew"})
+        result = run_audited(
+            "brew upgrade", tool="update_packages", args={"source": "brew"}
+        )
         return f"Brew update:\n{result.stdout}"
-    raise ToolError(f"Unknown source '{source}'. Supported: flatpak, brew, system, all.")
+    raise ToolError(
+        f"Unknown source '{source}'. Supported: flatpak, brew, system, all."
+    )

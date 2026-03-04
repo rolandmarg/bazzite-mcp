@@ -89,7 +89,7 @@ BLOCKED_PATTERNS = [
     # Fork bombs and resource exhaustion
     (r":\(\)\s*\{", "fork bomb detected"),
     (r"\bwhile\s+true\b.*\bdone\b", "infinite loop detected"),
-    (r";|&&|\|\||`", "shell metacharacters (;, &&, ||, `) are blocked"),
+    (r"[;|`]|&&|\|\|", "shell metacharacters (;, |, &&, ||, `) are blocked"),
     (r"\$\(", "command substitution $() is blocked"),
     # Privilege escalation via path
     (r"/usr/s?bin/rm\b", "use rm without full path"),
