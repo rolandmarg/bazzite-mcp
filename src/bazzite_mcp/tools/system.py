@@ -34,7 +34,7 @@ def _system_info_basic() -> str:
     gpu_lines = [
         line
         for line in lspci_result.stdout.splitlines()
-        if "vga" in line.lower() or "3d" in line.lower()
+        if "vga" in line.lower() or "3d controller" in line.lower()
     ]
     gpu_summary = "\n".join(gpu_lines[:2]) if gpu_lines else lspci_result.stdout
 
@@ -68,7 +68,7 @@ def _hardware_info() -> str:
     gpu_output = ""
     for index, line in enumerate(lspci_lines):
         lowered = line.lower()
-        if "vga" in lowered or "3d" in lowered:
+        if "vga" in lowered or "3d controller" in lowered:
             gpu_output = "\n".join(lspci_lines[index : index + 11])
             break
     if not gpu_output:

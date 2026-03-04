@@ -212,6 +212,10 @@ uv sync
 uv run pytest tests/ -v
 ```
 
+## Roadmap
+
+- [ ] **Vercel deployment** — deploy as a hosted service so any Bazzite user can connect without cloning the repo
+
 ## License
 
 [MIT](LICENSE)
