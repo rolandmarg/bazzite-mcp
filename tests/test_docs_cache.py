@@ -67,3 +67,18 @@ def test_search_with_injection_attempt(tmp_path, monkeypatch) -> None:
     results = cache.search('* OR "injection" NEAR/5')
     # May return results or empty, but should not raise
     assert isinstance(results, list)
+
+
+def test_search_expands_synonyms(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    cache = DocsCache()
+    cache.store_page(
+        url="https://docs.bazzite.gg/flatpak-permissions",
+        title="Flatpak Permissions",
+        content="Use Flatseal to manage Flatpak permissions for Firefox.",
+        section="Installing_and_Managing_Software",
+    )
+
+    results = cache.search("browser sandbox")
+    assert len(results) > 0
+    assert "Flatpak" in results[0]["title"]

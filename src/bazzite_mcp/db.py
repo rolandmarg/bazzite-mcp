@@ -90,3 +90,14 @@ def ensure_tables(conn: sqlite3.Connection, db_type: str) -> None:
     elif db_type == "cache":
         conn.executescript(CACHE_SCHEMA)
     conn.commit()
+
+
+def migrate_cache_schema(conn: sqlite3.Connection) -> None:
+    """Apply lightweight cache DB migrations for existing installations."""
+    cols = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(embeddings)").fetchall()
+    }
+    if "model" not in cols:
+        conn.execute("ALTER TABLE embeddings ADD COLUMN model TEXT DEFAULT ''")
+        conn.commit()

@@ -2,7 +2,20 @@ import re
 from datetime import datetime, timezone
 
 from bazzite_mcp.config import load_config
-from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
+from bazzite_mcp.db import (
+    ensure_tables,
+    get_connection,
+    get_db_path,
+    migrate_cache_schema,
+)
+
+
+SYNONYMS: dict[str, list[str]] = {
+    "browser": ["firefox", "chromium", "brave"],
+    "sandbox": ["flatpak", "permissions", "flatseal"],
+    "gamepad": ["controller", "joystick", "gamecontroller"],
+    "update": ["upgrade", "rebase", "rpm-ostree"],
+}
 
 
 def _sanitize_fts5_query(query: str) -> str:
@@ -17,11 +30,40 @@ def _sanitize_fts5_query(query: str) -> str:
     return " ".join(f'"{w}"' for w in words)
 
 
+def _expand_fts5_query(query: str) -> str:
+    """Expand query terms with Bazzite-specific synonyms for better recall."""
+    words = re.findall(r"\w+", query)
+    if not words:
+        return '""'
+
+    groups: list[str] = []
+    for raw in words:
+        terms = [raw]
+        terms.extend(SYNONYMS.get(raw.lower(), [])[:3])
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            lowered = term.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            deduped.append(term)
+
+        if len(deduped) == 1:
+            groups.append(f'"{deduped[0]}"')
+        else:
+            groups.append("(" + " OR ".join(f'"{term}"' for term in deduped) + ")")
+
+    return " AND ".join(groups)
+
+
 class DocsCache:
     def __init__(self) -> None:
         db_path = get_db_path("docs_cache.db")
         self._conn = get_connection(db_path)
         ensure_tables(self._conn, "cache")
+        migrate_cache_schema(self._conn)
 
     def close(self) -> None:
         self._conn.close()
@@ -47,12 +89,16 @@ class DocsCache:
         self._conn.commit()
 
     def search(self, query: str, limit: int = 10) -> list[dict]:
-        safe_query = _sanitize_fts5_query(query)
+        return self.search_scored(query, limit=limit)
+
+    def search_scored(self, query: str, limit: int = 20) -> list[dict]:
+        expanded_query = _expand_fts5_query(query)
         rows = self._conn.execute(
-            "SELECT p.url, p.title, p.content, p.section, p.fetched_at "
+            "SELECT p.url, p.title, p.content, p.section, p.fetched_at, "
+            "bm25(pages_fts) AS keyword_score "
             "FROM pages p JOIN pages_fts f ON p.id = f.rowid "
-            "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
-            (safe_query, limit),
+            "WHERE pages_fts MATCH ? ORDER BY keyword_score LIMIT ?",
+            (expanded_query, limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
