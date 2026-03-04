@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import atexit
+import argparse
 import logging
 import os
 import signal
 import sys
 
+from bazzite_mcp import __version__
 from bazzite_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,14 @@ def _signal_handler(signum: int, _frame: object) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="bazzite-mcp stdio server")
+    parser.add_argument("--version", action="store_true", help="Print version and exit")
+    args = parser.parse_args()
+
+    if args.version:
+        print(__version__)
+        return
+
     logging.basicConfig(
         level=getattr(
             logging,

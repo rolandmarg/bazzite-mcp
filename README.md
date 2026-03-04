@@ -26,6 +26,45 @@ Works with any MCP-compatible client: [Claude Code](https://claude.com/claude-co
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
+Package links:
+
+- PyPI: https://pypi.org/project/bazzite-mcp/
+- GitHub: https://github.com/rolandmarg/bazzite-mcp
+
+Install from PyPI:
+
+```bash
+uv tool install bazzite-mcp
+```
+
+Verify:
+
+```bash
+bazzite-mcp --version
+```
+
+### Upgrade
+
+```bash
+uv tool upgrade bazzite-mcp
+```
+
+### Uninstall
+
+Optionally remove cached data and config first:
+
+```bash
+bazzite-mcp-cleanup --include-config
+```
+
+Then uninstall the tool:
+
+```bash
+uv tool uninstall bazzite-mcp
+```
+
+### Install from source (development)
+
 ```bash
 git clone https://github.com/rolandmarg/bazzite-mcp.git
 cd bazzite-mcp
@@ -42,8 +81,7 @@ Add to `~/.claude/mcp.json`:
 {
   "mcpServers": {
     "bazzite": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/bazzite-mcp", "python", "-m", "bazzite_mcp"]
+      "command": "bazzite-mcp"
     }
   }
 }
@@ -51,11 +89,17 @@ Add to `~/.claude/mcp.json`:
 
 ### OpenCode
 
-Add to your OpenCode MCP config with the same command/args pattern.
+Add to OpenCode MCP config using the same command.
 
 ### Other MCP clients
 
-Any client supporting stdio transport can use the same `uv run` command.
+Any client supporting stdio transport can use `bazzite-mcp` as the command.
+
+If you run from a source checkout instead of a tool install, use:
+
+```bash
+uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp
+```
 
 ## Tools
 
@@ -162,6 +206,12 @@ systemctl --user enable --now bazzite-mcp-refresh.timer
 Manual refresh is still available via `docs(action='refresh')`, or directly:
 
 ```bash
+bazzite-mcp-refresh
+```
+
+From source checkout:
+
+```bash
 uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.refresh
 ```
 
@@ -183,27 +233,31 @@ Environment variable overrides:
 | `BAZZITE_MCP_CRAWL_MAX` | `100` | Max pages to crawl |
 | `BAZZITE_MCP_ENV_FILE` | `~/.config/bazzite-mcp/env` | Path to env file loaded at startup |
 
-## Uninstall
+## Data cleanup
 
-Remove all data (docs cache, audit log):
+Preview what would be removed:
 
 ```bash
-uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup
+bazzite-mcp-cleanup --dry-run
+```
+
+Remove docs cache and audit log:
+
+```bash
+bazzite-mcp-cleanup
 ```
 
 Also remove config files:
 
 ```bash
-uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup --include-config
+bazzite-mcp-cleanup --include-config
 ```
 
-Preview what would be removed:
+From source checkout:
 
 ```bash
-uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup --dry-run
+uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup --include-config
 ```
-
-Then remove the repo itself and the MCP client config entry.
 
 ## Development
 
@@ -214,7 +268,8 @@ uv run pytest tests/ -v
 
 ## Roadmap
 
-- [ ] **Vercel deployment** — deploy as a hosted service so any Bazzite user can connect without cloning the repo
+- [ ] **Smithery listing** — publish as a local stdio MCP server for easier discovery
+- [ ] **Signed release flow** — add package signing and provenance docs for published artifacts
 
 ## License
 

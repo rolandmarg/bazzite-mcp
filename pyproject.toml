@@ -3,6 +3,7 @@ name = "bazzite-mcp"
 version = "0.1.0"
 description = "MCP server providing AI-native awareness and control of Bazzite OS"
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Roland", email = "rmargve@gmail.com" }
 ]
@@ -13,6 +14,16 @@ dependencies = [
     "httpx>=0.28.1",
     "vdf>=3.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rolandmarg/bazzite-mcp"
+Repository = "https://github.com/rolandmarg/bazzite-mcp"
+Issues = "https://github.com/rolandmarg/bazzite-mcp/issues"
+
+[project.scripts]
+bazzite-mcp = "bazzite_mcp.__main__:main"
+bazzite-mcp-refresh = "bazzite_mcp.refresh:main"
+bazzite-mcp-cleanup = "bazzite_mcp.cleanup:main"
 
 [build-system]
 requires = ["uv_build>=0.10.7,<0.11.0"]

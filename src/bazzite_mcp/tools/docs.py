@@ -324,6 +324,11 @@ async def _refresh_docs_cache(ctx: Context | None = None) -> str:
     return report
 
 
+async def refresh_docs_cache(ctx: Context | None = None) -> str:
+    """Public wrapper for docs cache refresh."""
+    return await _refresh_docs_cache(ctx)
+
+
 # --- Dispatcher ---
 
 from typing import Literal

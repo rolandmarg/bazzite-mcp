@@ -3,6 +3,12 @@
 MCP server giving AI agents awareness and control of a Bazzite OS installation.
 Runs on the host over stdio via FastMCP.
 
+Install/upgrade/uninstall is handled with `uv tool`:
+
+- Install: `uv tool install bazzite-mcp`
+- Upgrade: `uv tool upgrade bazzite-mcp`
+- Uninstall: `uv tool uninstall bazzite-mcp`
+
 ```
 MCP Client ──stdio──▶ FastMCP (server.py)
                           │
@@ -47,6 +53,7 @@ src/bazzite_mcp/
 ├── db.py                # SQLite helpers and schemas
 ├── config.py            # Defaults < config.toml < env vars
 ├── cleanup.py           # Data cleanup and uninstall utilities
+├── refresh.py           # Standalone docs refresh entrypoint
 ├── cache/
 │   └── docs_cache.py    # FTS5 keyword search with synonym expansion
 └── tools/
@@ -61,6 +68,14 @@ src/bazzite_mcp/
     ├── docs.py          # Docs search + crawler + changelog
     └── audit_tools.py   # Audit log query + rollback
 ```
+
+## Console scripts
+
+The package publishes three console commands:
+
+- `bazzite-mcp` — starts the MCP server (`stdio` transport)
+- `bazzite-mcp-refresh` — refreshes docs cache
+- `bazzite-mcp-cleanup` — removes local cache/audit/config data
 
 ## Storage
 
