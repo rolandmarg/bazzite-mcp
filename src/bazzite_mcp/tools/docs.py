@@ -1,4 +1,5 @@
 import re
+import asyncio
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -313,46 +314,87 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
     visited: set[str] = set()
     to_visit: set[str] = {cfg.docs_base_url + "/"}
     max_pages = cfg.crawl_max_pages
+    concurrency = 5
+    sem = asyncio.Semaphore(concurrency)
 
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        while to_visit and fetched < max_pages:
-            url = to_visit.pop()
-            if url in visited:
-                continue
-            visited.add(url)
-
+    async def fetch_one(client: httpx.AsyncClient, url: str) -> dict:
+        async with sem:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
             except Exception as exc:
-                errors.append(f"{url}: {exc}")
-                continue
+                return {"url": url, "error": str(exc), "links": set(), "page": None}
 
             soup = BeautifulSoup(response.text, "html.parser")
+            links = _discover_doc_links(soup, url)
 
-            # Discover more links before extracting content
-            new_links = _discover_doc_links(soup, url)
-            to_visit.update(new_links - visited)
-
-            # Extract content
             content = _extract_content(soup)
             if not content:
-                errors.append(f"{url}: no extractable content")
-                continue
+                return {
+                    "url": url,
+                    "error": "no extractable content",
+                    "links": links,
+                    "page": None,
+                }
 
             title_tag = soup.find("title")
             title = title_tag.get_text(strip=True) if title_tag else url
 
-            # Derive section from URL path
             parsed = urlparse(url)
             path_parts = [p for p in parsed.path.strip("/").split("/") if p]
             section = "/".join(path_parts) if path_parts else "Home"
 
-            cache.store_page(url=url, title=title, content=content, section=section)
-            fetched += 1
+            return {
+                "url": url,
+                "error": None,
+                "links": links,
+                "page": {
+                    "url": url,
+                    "title": title,
+                    "content": content,
+                    "section": section,
+                },
+            }
 
-            if ctx:
-                await ctx.report_progress(fetched, max_pages)
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        while to_visit and fetched < max_pages:
+            batch: list[str] = []
+            while to_visit and len(batch) < concurrency:
+                url = to_visit.pop()
+                if url in visited:
+                    continue
+                visited.add(url)
+                batch.append(url)
+
+            if not batch:
+                continue
+
+            results = await asyncio.gather(*(fetch_one(client, url) for url in batch))
+            for result in results:
+                links = result.get("links", set())
+                if isinstance(links, set):
+                    to_visit.update(links - visited)
+
+                page = result.get("page")
+                if isinstance(page, dict):
+                    cache.store_page(
+                        url=str(page["url"]),
+                        title=str(page["title"]),
+                        content=str(page["content"]),
+                        section=str(page["section"]),
+                    )
+                    fetched += 1
+                    if ctx:
+                        await ctx.report_progress(fetched, max_pages)
+                    if fetched >= max_pages:
+                        break
+                else:
+                    errors.append(
+                        f"{result.get('url', 'unknown')}: {result.get('error', 'unknown error')}"
+                    )
+
+            if fetched >= max_pages:
+                break
 
     # Fetch changelogs from GitHub
     try:
