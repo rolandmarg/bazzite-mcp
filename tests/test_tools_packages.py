@@ -1,3 +1,4 @@
+import subprocess
 from unittest.mock import MagicMock, patch
 
 from bazzite_mcp.runner import CommandResult
@@ -6,7 +7,9 @@ from bazzite_mcp.tools.packages import install_package, list_packages, search_pa
 
 @patch("bazzite_mcp.tools.packages.run_command")
 def test_search_package(mock_run: MagicMock) -> None:
-    mock_run.return_value = MagicMock(returncode=0, stdout="org.mozilla.firefox", stderr="")
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="org.mozilla.firefox", stderr=""
+    )
     result = search_package("firefox")
     assert "firefox" in result.lower()
 
@@ -38,8 +41,10 @@ def test_install_package_ujust_found_first(mock_run: MagicMock) -> None:
 def test_install_package_flatpak_fallback(mock_run: MagicMock) -> None:
     """When ujust finds nothing, flatpak is tried next."""
     mock_run.side_effect = [
-        CommandResult(returncode=1, stdout="", stderr=""),    # ujust miss
-        CommandResult(returncode=0, stdout="org.mozilla.firefox\tFirefox\t128", stderr=""),  # flatpak hit
+        CommandResult(returncode=1, stdout="", stderr=""),  # ujust miss
+        CommandResult(
+            returncode=0, stdout="org.mozilla.firefox\tFirefox\t128", stderr=""
+        ),  # flatpak hit
     ]
     result = install_package("firefox")
     assert "flatpak" in result.lower()
@@ -57,3 +62,29 @@ def test_install_package_brew_fallback_cli(mock_run: MagicMock) -> None:
     result = install_package("ripgrep")
     assert "brew" in result.lower() or "homebrew" in result.lower()
     assert "ripgrep" in result
+
+
+@patch("bazzite_mcp.tools.packages.run_command")
+def test_search_package_sets_brew_no_auto_update(mock_run: MagicMock) -> None:
+    mock_run.side_effect = [
+        CommandResult(returncode=1, stdout="", stderr=""),
+        CommandResult(returncode=1, stdout="", stderr=""),
+        CommandResult(returncode=1, stdout="", stderr=""),
+    ]
+    result = search_package("virt-manager")
+    assert "No results" in result
+    assert any(
+        "HOMEBREW_NO_AUTO_UPDATE=1 brew search" in str(call.args[0])
+        for call in mock_run.call_args_list
+    )
+
+
+@patch("bazzite_mcp.tools.packages.run_command")
+def test_search_package_continues_on_timeout(mock_run: MagicMock) -> None:
+    mock_run.side_effect = [
+        CommandResult(returncode=1, stdout="", stderr=""),
+        subprocess.TimeoutExpired(cmd="flatpak search virt-manager", timeout=20),
+        CommandResult(returncode=1, stdout="", stderr=""),
+    ]
+    result = search_package("virt-manager")
+    assert "timed out querying flatpak" in result

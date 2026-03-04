@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import subprocess
 from typing import Literal
 
-from bazzite_mcp.runner import ToolError, run_audited, run_command
+from mcp.server.fastmcp.exceptions import ToolError
+
+from bazzite_mcp.runner import CommandResult, run_audited, run_command
 
 
 INSTALL_POLICY = """Bazzite 6-tier install hierarchy (official docs.bazzite.gg):
@@ -15,6 +18,22 @@ INSTALL_POLICY = """Bazzite 6-tier install hierarchy (official docs.bazzite.gg):
 4. distrobox - for packages from other distro repos (apt, pacman, etc.)
 5. AppImage - portable apps from trusted sources only
 6. rpm-ostree - last resort. Can freeze updates, block rebasing, cause conflicts."""
+
+SEARCH_TIMEOUT_SECONDS = 20
+
+
+def _run_search_command(
+    command: str, timeout: int = SEARCH_TIMEOUT_SECONDS
+) -> CommandResult:
+    """Run a search/listing command with bounded timeout and graceful timeout handling."""
+    try:
+        return run_command(command, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return CommandResult(
+            returncode=124,
+            stdout="",
+            stderr=f"Timed out after {timeout}s",
+        )
 
 
 def install_package(
@@ -29,7 +48,7 @@ def install_package(
         return _install_with_method(package, method)
 
     pkg = shlex.quote(package)
-    ujust_summary = run_command("ujust --summary 2>/dev/null")
+    ujust_summary = _run_search_command("ujust --summary 2>/dev/null")
     ujust_lines = (
         ujust_summary.stdout.strip().splitlines() if ujust_summary.stdout else []
     )
@@ -45,14 +64,16 @@ def install_package(
             + f"\n\nRun with: ujust_run tool\n\n{INSTALL_POLICY}"
         )
 
-    flatpak_check = run_command(f"flatpak search {pkg} 2>/dev/null")
+    flatpak_check = _run_search_command(f"flatpak search {pkg} 2>/dev/null")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
         return (
             f"Flatpak results for '{package}':\n{flatpak_check.stdout}\n\n"
             f"Recommended: flatpak install flathub <app-id>\n\n{INSTALL_POLICY}"
         )
 
-    brew_check = run_command(f"brew search {pkg} 2>/dev/null")
+    brew_check = _run_search_command(
+        f"HOMEBREW_NO_AUTO_UPDATE=1 brew search {pkg} 2>/dev/null"
+    )
     if brew_check.returncode == 0 and brew_check.stdout.strip():
         return (
             f"Homebrew results for '{package}':\n{brew_check.stdout}\n\n"
@@ -134,9 +155,12 @@ def remove_package(
 def search_package(package: str) -> str:
     """Search package across ujust, flatpak, brew."""
     parts: list[str] = []
+    timed_out: list[str] = []
 
     pkg = shlex.quote(package)
-    ujust_check = run_command("ujust --summary 2>/dev/null")
+    ujust_check = _run_search_command("ujust --summary 2>/dev/null")
+    if ujust_check.returncode == 124:
+        timed_out.append("ujust")
     if ujust_check.returncode == 0 and ujust_check.stdout.strip():
         matching_lines = [
             line
@@ -146,20 +170,33 @@ def search_package(package: str) -> str:
         if matching_lines:
             parts.append("[Tier 1 - ujust]\n" + "\n".join(matching_lines))
 
-    flatpak_check = run_command(f"flatpak search {pkg} 2>/dev/null")
+    flatpak_check = _run_search_command(f"flatpak search {pkg} 2>/dev/null")
+    if flatpak_check.returncode == 124:
+        timed_out.append("flatpak")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
         parts.append(f"[Tier 2 - Flatpak]\n{flatpak_check.stdout}")
 
-    brew_check = run_command(f"brew search {pkg} 2>/dev/null")
+    brew_check = _run_search_command(
+        f"HOMEBREW_NO_AUTO_UPDATE=1 brew search {pkg} 2>/dev/null"
+    )
+    if brew_check.returncode == 124:
+        timed_out.append("brew")
     if brew_check.returncode == 0 and brew_check.stdout.strip():
         parts.append(f"[Tier 3 - Homebrew]\n{brew_check.stdout}")
 
     if not parts:
+        timeout_note = (
+            f"\nNote: timed out querying {', '.join(timed_out)}." if timed_out else ""
+        )
         return (
             f"No results for '{package}' in ujust, flatpak, or brew.\n"
             "Consider distrobox or rpm-ostree (last resort)."
+            f"{timeout_note}"
         )
-    return "\n\n".join(parts) + f"\n\n{INSTALL_POLICY}"
+    timeout_note = (
+        f"\n\nNote: timed out querying {', '.join(timed_out)}." if timed_out else ""
+    )
+    return "\n\n".join(parts) + timeout_note + f"\n\n{INSTALL_POLICY}"
 
 
 def list_packages(
@@ -170,19 +207,19 @@ def list_packages(
     sources = [source] if source else ["flatpak", "brew", "rpm-ostree"]
 
     if "flatpak" in sources:
-        result = run_command(
+        result = _run_search_command(
             "flatpak list --app --columns=name,application,version 2>/dev/null"
         )
         if result.returncode == 0 and result.stdout.strip():
             parts.append(f"=== Flatpak ===\n{result.stdout}")
 
     if "brew" in sources:
-        result = run_command("brew list 2>/dev/null")
+        result = _run_search_command("HOMEBREW_NO_AUTO_UPDATE=1 brew list 2>/dev/null")
         if result.returncode == 0 and result.stdout.strip():
             parts.append(f"=== Homebrew ===\n{result.stdout}")
 
     if "rpm-ostree" in sources:
-        result = run_command("rpm-ostree status --json 2>/dev/null")
+        result = _run_search_command("rpm-ostree status --json 2>/dev/null")
         if result.returncode == 0:
             layered = "No layered packages"
             try:
