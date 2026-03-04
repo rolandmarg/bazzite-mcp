@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Literal
 
-from bazzite_mcp.runner import run_command
+from bazzite_mcp.runner import ToolError, run_command
 
 
 def system_info() -> str:
@@ -31,13 +31,17 @@ def disk_usage() -> str:
     result = run_command(
         "df -h --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs -x squashfs"
     )
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def update_status() -> str:
     """Check OS update status via rpm-ostree."""
     result = run_command("rpm-ostree status")
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def journal_logs(
@@ -56,7 +60,9 @@ def journal_logs(
         cmd += f" --since {shlex.quote(since)}"
 
     result = run_command(cmd)
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def hardware_info() -> str:
@@ -81,4 +87,6 @@ def process_list(sort_by: Literal["cpu", "mem"] = "cpu", count: int = 15) -> str
     sort_flag = "-%cpu" if sort_by == "cpu" else "-%mem"
     safe_count = max(1, min(count, 100))
     result = run_command(f"ps aux --sort={sort_flag} | head -n {safe_count + 1}")
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout

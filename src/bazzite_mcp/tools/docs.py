@@ -3,10 +3,12 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
+from mcp.server.fastmcp import Context
 
 from bazzite_mcp.cache.docs_cache import DocsCache
 from bazzite_mcp.cache.embeddings import embed_pages, semantic_search
 from bazzite_mcp.config import load_config
+from bazzite_mcp.runner import ToolError
 
 
 def _extract_content(soup: BeautifulSoup) -> str | None:
@@ -64,7 +66,7 @@ def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
     return links
 
 
-def _ensure_fresh_docs_cache(cache: DocsCache) -> tuple[DocsCache, str]:
+async def _ensure_fresh_docs_cache(cache: DocsCache, ctx: Context | None = None) -> tuple[DocsCache, str]:
     """Refresh docs on demand when cache is empty or stale."""
     reason = ""
     if cache.page_count() == 0:
@@ -75,7 +77,7 @@ def _ensure_fresh_docs_cache(cache: DocsCache) -> tuple[DocsCache, str]:
     if not reason:
         return cache, ""
 
-    report = refresh_docs_cache()
+    report = await refresh_docs_cache(ctx)
     refreshed_cache = DocsCache()
     if refreshed_cache.page_count() == 0:
         return refreshed_cache, (
@@ -89,7 +91,7 @@ def _ensure_fresh_docs_cache(cache: DocsCache) -> tuple[DocsCache, str]:
     )
 
 
-def query_bazzite_docs(query: str) -> str:
+async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
     """Keyword search over cached Bazzite documentation (FTS5).
 
     Best for: exact terms, command names, package names, error messages.
@@ -97,7 +99,7 @@ def query_bazzite_docs(query: str) -> str:
     Auto-refreshes cache when empty or stale.
     """
     cache = DocsCache()
-    cache, refresh_note = _ensure_fresh_docs_cache(cache)
+    cache, refresh_note = await _ensure_fresh_docs_cache(cache, ctx)
 
     if cache.page_count() == 0:
         return (
@@ -118,7 +120,7 @@ def query_bazzite_docs(query: str) -> str:
     return "\n\n---\n\n".join(parts) + refresh_note
 
 
-def semantic_search_docs(query: str, limit: int = 5) -> str:
+async def semantic_search_docs(query: str, limit: int = 5, ctx: Context | None = None) -> str:
     """Semantic similarity search over cached Bazzite docs using AI embeddings.
 
     Best for: natural language questions where exact keywords may not match
@@ -127,7 +129,7 @@ def semantic_search_docs(query: str, limit: int = 5) -> str:
     Falls back to keyword search if embeddings are unavailable.
     """
     cache = DocsCache()
-    cache, refresh_note = _ensure_fresh_docs_cache(cache)
+    cache, refresh_note = await _ensure_fresh_docs_cache(cache, ctx)
 
     if cache.page_count() == 0:
         return (
@@ -138,8 +140,16 @@ def semantic_search_docs(query: str, limit: int = 5) -> str:
     results = semantic_search(cache._conn, query, limit=limit)
     if not results:
         # Fall back to keyword search
-        fallback = query_bazzite_docs(query)
-        return fallback + refresh_note
+        fallback = cache.search(query)
+        if not fallback:
+            return f"No results for '{query}' in cached docs." + refresh_note
+        parts: list[str] = []
+        for r in fallback:
+            snippet = r["content"][:500]
+            parts.append(
+                f"### {r['title']} ({r['section']})\n{snippet}\nSource: {r['url']}"
+            )
+        return "\n\n---\n\n".join(parts) + refresh_note
 
     parts: list[str] = []
     for r in results:
@@ -151,7 +161,7 @@ def semantic_search_docs(query: str, limit: int = 5) -> str:
     return "\n\n---\n\n".join(parts) + refresh_note
 
 
-def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
+async def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
     """Get Bazzite release changelog from cache or GitHub API."""
     cfg = load_config()
     cache = DocsCache()
@@ -163,13 +173,14 @@ def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
         )
 
     try:
-        response = httpx.get(
-            cfg.github_releases_url, params={"per_page": count}, timeout=15
-        )
-        response.raise_for_status()
-        releases = response.json()
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                cfg.github_releases_url, params={"per_page": count}
+            )
+            response.raise_for_status()
+            releases = response.json()
     except Exception as exc:
-        return f"Failed to fetch changelogs: {exc}"
+        raise ToolError(f"Failed to fetch changelogs: {exc}") from exc
 
     parts: list[str] = []
     for release in releases:
@@ -211,14 +222,14 @@ def install_policy(app_type: str) -> str:
 
     if app_type not in policies:
         supported = ", ".join(policies.keys())
-        return (
+        raise ToolError(
             f"Unknown app type '{app_type}'. Supported: {supported}.\n\n"
             "General hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree"
         )
     return policies[app_type]
 
 
-def refresh_docs_cache() -> str:
+async def refresh_docs_cache(ctx: Context | None = None) -> str:
     """Crawl docs.bazzite.gg recursively and refresh the local cache.
 
     Discovers all pages by following internal links starting from the homepage.
@@ -235,8 +246,7 @@ def refresh_docs_cache() -> str:
     to_visit: set[str] = {cfg.docs_base_url + "/"}
     max_pages = cfg.crawl_max_pages
 
-    client = httpx.Client(timeout=15, follow_redirects=True)
-    try:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
         while to_visit and fetched < max_pages:
             url = to_visit.pop()
             if url in visited:
@@ -244,7 +254,7 @@ def refresh_docs_cache() -> str:
             visited.add(url)
 
             try:
-                response = client.get(url)
+                response = await client.get(url)
                 response.raise_for_status()
             except Exception as exc:
                 errors.append(f"{url}: {exc}")
@@ -272,26 +282,28 @@ def refresh_docs_cache() -> str:
 
             cache.store_page(url=url, title=title, content=content, section=section)
             fetched += 1
-    finally:
-        client.close()
+
+            if ctx:
+                await ctx.report_progress(fetched, max_pages)
 
     # Fetch changelogs from GitHub
     try:
-        response = httpx.get(
-            cfg.github_releases_url, params={"per_page": 10}, timeout=15
-        )
-        response.raise_for_status()
-        for release in response.json():
-            cache.store_changelog(
-                release.get("tag_name", "unknown"),
-                release.get("published_at", ""),
-                release.get("body", ""),
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                cfg.github_releases_url, params={"per_page": 10}
             )
+            response.raise_for_status()
+            for release in response.json():
+                cache.store_changelog(
+                    release.get("tag_name", "unknown"),
+                    release.get("published_at", ""),
+                    release.get("body", ""),
+                )
     except Exception as exc:
         errors.append(f"GitHub releases: {exc}")
 
     # Generate embeddings if API key is available
-    embedded, embed_errors = embed_pages(cache._conn)
+    embedded, embed_errors = await embed_pages(cache._conn)
     errors.extend(embed_errors)
 
     report = f"Refreshed docs cache: {fetched} pages crawled (max {max_pages})."

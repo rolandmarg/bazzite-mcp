@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Literal
 
-from bazzite_mcp.runner import run_audited, run_command
+from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
 def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
@@ -14,7 +14,7 @@ def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
         "auto": "default",
     }
     if mode not in schemes:
-        return f"Unknown mode '{mode}'. Supported: dark, light, auto."
+        raise ToolError(f"Unknown mode '{mode}'. Supported: dark, light, auto.")
 
     scheme = schemes[mode]
     result = run_audited(
@@ -24,7 +24,7 @@ def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
         rollback=f"gsettings set org.gnome.desktop.interface color-scheme 'default'",
     )
     if result.returncode != 0:
-        return f"Failed to set theme: {result.stderr}"
+        raise ToolError(f"Failed to set theme: {result.stderr}")
     return f"Theme set to {mode} (color-scheme: {scheme})"
 
 
@@ -40,7 +40,7 @@ def set_audio_output(device: str | None = None) -> str:
         args={"device": device},
     )
     if result.returncode != 0:
-        return f"Failed to switch audio: {result.stderr}"
+        raise ToolError(f"Failed to switch audio: {result.stderr}")
     return f"Audio output switched to: {device}"
 
 
@@ -67,7 +67,7 @@ def set_display_config(
             args={"output": output, "scale": scale},
         )
         if result.returncode != 0:
-            return f"Failed to set scale: {result.stderr}"
+            raise ToolError(f"Failed to set scale: {result.stderr}")
 
     cmd = f"gnome-randr modify {soutput}"
     if resolution:
@@ -93,7 +93,7 @@ def set_display_config(
                 args={"output": output, "resolution": resolution, "refresh": refresh, "via": "xrandr"},
             )
             if result.returncode != 0:
-                return f"Failed to set display config: {result.stderr}"
+                raise ToolError(f"Failed to set display config: {result.stderr}")
 
     return (
         f"Display '{output}' configured: "
@@ -110,7 +110,7 @@ def set_power_profile(profile: Literal["performance", "balanced", "power-saver"]
         args={"profile": profile},
     )
     if result.returncode != 0:
-        return f"Failed to set power profile: {result.stderr}"
+        raise ToolError(f"Failed to set power profile: {result.stderr}")
     return f"Power profile set to: {profile}"
 
 
@@ -118,7 +118,7 @@ def get_settings(schema: str, key: str) -> str:
     """Read a gsettings value."""
     result = run_command(f"gsettings get {shlex.quote(schema)} {shlex.quote(key)}")
     if result.returncode != 0:
-        return f"Error reading {schema} {key}: {result.stderr}"
+        raise ToolError(f"Error reading {schema} {key}: {result.stderr}")
     return result.stdout
 
 
@@ -130,5 +130,5 @@ def set_settings(schema: str, key: str, value: str) -> str:
         args={"schema": schema, "key": key, "value": value},
     )
     if result.returncode != 0:
-        return f"Error setting {schema} {key}: {result.stderr}"
+        raise ToolError(f"Error setting {schema} {key}: {result.stderr}")
     return f"Set {schema} {key} = {value}"

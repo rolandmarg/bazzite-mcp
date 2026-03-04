@@ -1,6 +1,6 @@
 import shlex
 
-from bazzite_mcp.runner import run_audited, run_command
+from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
 def ujust_list(filter: str | None = None) -> str:
@@ -9,7 +9,7 @@ def ujust_list(filter: str | None = None) -> str:
     if result.returncode != 0:
         result = run_command("ujust")
         if result.returncode != 0:
-            return f"Error listing ujust commands: {result.stderr}"
+            raise ToolError(f"Error listing ujust commands: {result.stderr}")
 
     lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
     if filter:
@@ -21,7 +21,7 @@ def ujust_show(command: str) -> str:
     """Show the source script of a ujust command before running it."""
     result = run_command(f"ujust --show {shlex.quote(command)}")
     if result.returncode != 0:
-        return f"Error showing command '{command}': {result.stderr}"
+        raise ToolError(f"Error showing command '{command}': {result.stderr}")
     return result.stdout
 
 
@@ -34,10 +34,10 @@ def ujust_run(command: str) -> str:
     try:
         parts = shlex.split(command)
     except ValueError:
-        return "Invalid command syntax."
+        raise ToolError("Invalid command syntax.")
 
     if not parts:
-        return "Missing ujust command."
+        raise ToolError("Missing ujust command.")
 
     recipe = parts[0]
     if len(parts) >= 2 and parts[1] in {"help", "--help", "-h"}:
@@ -47,7 +47,7 @@ def ujust_run(command: str) -> str:
         fallback = run_command(f"ujust --show {shlex.quote(recipe)}")
         if fallback.returncode == 0 and fallback.stdout.strip():
             return fallback.stdout
-        return f"Could not retrieve usage for '{recipe}'."
+        raise ToolError(f"Could not retrieve usage for '{recipe}'.")
 
     recipe_source = run_command(f"ujust --show {shlex.quote(recipe)}")
     if (
@@ -55,7 +55,7 @@ def ujust_run(command: str) -> str:
         and len(parts) == 1
         and "Choose" in recipe_source.stdout
     ):
-        return (
+        raise ToolError(
             f"'{recipe}' appears interactive. Pass an explicit non-interactive option "
             "(for example: '<recipe> help') or inspect it with ujust_show first."
         )
@@ -69,5 +69,5 @@ def ujust_run(command: str) -> str:
     if result.stderr:
         output += f"\nSTDERR: {result.stderr}"
     if result.returncode != 0:
-        output = f"Command failed (exit {result.returncode}):\n{output}"
+        raise ToolError(f"Command failed (exit {result.returncode}):\n{output}")
     return output

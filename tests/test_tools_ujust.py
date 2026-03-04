@@ -1,5 +1,8 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from bazzite_mcp.runner import ToolError
 from bazzite_mcp.tools.ujust import ujust_list, ujust_run, ujust_show
 
 
@@ -70,9 +73,8 @@ def test_ujust_run_blocks_interactive_recipe_without_option(
         stderr="",
     )
 
-    result = ujust_run("my_recipe")
-
-    assert "appears interactive" in result
+    with pytest.raises(ToolError):
+        ujust_run("my_recipe")
 
 
 @patch("bazzite_mcp.tools.ujust.run_audited")

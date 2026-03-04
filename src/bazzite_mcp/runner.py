@@ -5,6 +5,8 @@ import logging
 import subprocess
 from dataclasses import dataclass
 
+from mcp.server.fastmcp.exceptions import ToolError
+
 from bazzite_mcp.guardrails import check_command
 
 logger = logging.getLogger(__name__)

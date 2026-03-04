@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, call, patch
 
-from bazzite_mcp.runner import CommandResult
+import pytest
+
+from bazzite_mcp.runner import CommandResult, ToolError
 from bazzite_mcp.tools.services import manage_firewall, manage_service, network_status, service_status
 
 
@@ -59,9 +61,8 @@ def test_manage_service_disable(mock_audited: MagicMock) -> None:
 
 
 def test_manage_service_invalid_action() -> None:
-    result = manage_service("bluetooth.service", "destroy")
-    assert "Unknown action" in result
-    assert "destroy" in result
+    with pytest.raises(ToolError, match="Unknown action"):
+        manage_service("bluetooth.service", "destroy")
 
 
 @patch("bazzite_mcp.tools.services.run_audited")

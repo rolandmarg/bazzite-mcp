@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Literal
 
-from bazzite_mcp.runner import run_audited, run_command
+from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
 DISTROBOX_IMAGES = {
@@ -33,7 +33,7 @@ def create_distrobox(name: str, image: str | None = None) -> str:
         rollback=f"distrobox rm --force {sname}",
     )
     if result.returncode != 0:
-        return f"Failed to create distrobox '{name}': {result.stderr}"
+        raise ToolError(f"Failed to create distrobox '{name}': {result.stderr}")
     return f"Container '{name}' created with image '{image}'.\nEnter with: distrobox enter {name}"
 
 
@@ -59,15 +59,19 @@ def manage_distrobox(name: str, action: Literal["enter", "stop", "remove"]) -> s
             args={"name": name, "action": action},
         )
     else:
-        return f"Unknown action '{action}'. Supported: enter, stop, remove."
+        raise ToolError(f"Unknown action '{action}'. Supported: enter, stop, remove.")
 
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def list_distroboxes() -> str:
     """List existing distrobox containers with status."""
     result = run_command("distrobox list")
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def exec_in_distrobox(name: str, command: str) -> str:
@@ -79,7 +83,7 @@ def exec_in_distrobox(name: str, command: str) -> str:
     try:
         parts = shlex.split(command)
     except ValueError:
-        return "Invalid command syntax."
+        raise ToolError("Invalid command syntax.")
     safe_cmd = shlex.join(parts)
     result = run_audited(
         f"distrobox enter {shlex.quote(name)} -- {safe_cmd}",
@@ -100,7 +104,7 @@ def export_distrobox_app(name: str, app: str) -> str:
         args={"name": name, "app": app},
     )
     if result.returncode != 0:
-        return f"Failed to export '{app}' from '{name}': {result.stderr}"
+        raise ToolError(f"Failed to export '{app}' from '{name}': {result.stderr}")
     return f"Exported '{app}' from container '{name}' to host application menu."
 
 
@@ -126,7 +130,9 @@ def manage_quadlet(
 
     if action in ("start", "stop") and name:
         result = run_command(f"systemctl --user {action} {shlex.quote(name)}")
-        return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+        if result.returncode != 0:
+            raise ToolError(f"Error: {result.stderr}")
+        return result.stdout
 
     if action == "create" and name and image:
         quadlet_dir = "~/.config/containers/systemd"
@@ -146,7 +152,7 @@ WantedBy=default.target
             f"{unit_content}\nThen run: systemctl --user daemon-reload && systemctl --user start {name}"
         )
 
-    return "Usage: action='list|create|start|stop|status|remove', name=<service>, image=<image>"
+    raise ToolError("Usage: action='list|create|start|stop|status|remove', name=<service>, image=<image>")
 
 
 def manage_podman(
@@ -167,14 +173,14 @@ def manage_podman(
         # Block dangerous flags
         for flag in BLOCKED_FLAGS:
             if flag in image:
-                return f"Blocked: '{flag}' is not allowed for safety."
+                raise ToolError(f"Blocked: '{flag}' is not allowed for safety.")
         parts.append(shlex.quote(image))
     elif action in ("stop", "rm", "logs", "inspect", "exec") and container:
         parts.append(shlex.quote(container))
     elif action in ("ps", "images"):
         pass  # No extra args needed
     elif action == "run" and not image:
-        return "Error: 'image' is required for podman run."
+        raise ToolError("Error: 'image' is required for podman run.")
 
     cmd = " ".join(parts)
     if action in ("run", "stop", "rm", "pull"):
@@ -185,7 +191,9 @@ def manage_podman(
         )
     else:
         result = run_command(cmd)
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def manage_waydroid(action: Literal["setup", "status", "start", "stop"]) -> str:
@@ -209,6 +217,8 @@ def manage_waydroid(action: Literal["setup", "status", "start", "stop"]) -> str:
             )
         else:
             result = run_command("waydroid status")
-        return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+        if result.returncode != 0:
+            raise ToolError(f"Error: {result.stderr}")
+        return result.stdout
 
-    return f"Unknown action '{action}'. Supported: setup, status, start, stop."
+    raise ToolError(f"Unknown action '{action}'. Supported: setup, status, start, stop.")

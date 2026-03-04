@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Literal
 
-from bazzite_mcp.runner import run_audited, run_command
+from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
 def manage_service(
@@ -14,7 +14,7 @@ def manage_service(
     """Start, stop, restart, enable, or disable a systemd service."""
     valid_actions = ("start", "stop", "restart", "enable", "disable", "enable --now", "disable --now")
     if action not in valid_actions:
-        return f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}."
+        raise ToolError(f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}.")
 
     scope = "--user" if user else ""
     sname = shlex.quote(name)
@@ -29,7 +29,7 @@ def manage_service(
         rollback=rollback_cmd,
     )
     if result.returncode != 0:
-        return f"Failed to {action} {name}: {result.stderr}"
+        raise ToolError(f"Failed to {action} {name}: {result.stderr}")
     return f"Service '{name}' {action} successful."
 
 
@@ -99,7 +99,7 @@ def manage_connection(
         try:
             prop_parts = shlex.split(properties)
         except ValueError:
-            return "Invalid properties syntax."
+            raise ToolError("Invalid properties syntax.")
         safe_props = " ".join(shlex.quote(p) for p in prop_parts)
         result = run_audited(
             f"nmcli connection modify {shlex.quote(name)} {safe_props}",
@@ -107,9 +107,11 @@ def manage_connection(
             args={"action": action, "name": name, "properties": properties},
         )
     else:
-        return "Usage: action='show|up|down|delete|modify', name=<connection>, properties=<nmcli args for modify>"
+        raise ToolError("Usage: action='show|up|down|delete|modify', name=<connection>, properties=<nmcli args for modify>")
 
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def manage_firewall(
@@ -157,9 +159,11 @@ def manage_firewall(
             rollback=f"pkexec firewall-cmd --add-service={ssvc} --permanent && pkexec firewall-cmd --reload",
         )
     else:
-        return "Usage: action='list|add-port|remove-port|add-service|remove-service'"
+        raise ToolError("Usage: action='list|add-port|remove-port|add-service|remove-service'")
 
-    return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        raise ToolError(f"Error: {result.stderr}")
+    return result.stdout
 
 
 def manage_tailscale(action: Literal["status", "up", "down", "ip", "peers"]) -> str:
@@ -180,9 +184,9 @@ def manage_tailscale(action: Literal["status", "up", "down", "ip", "peers"]) -> 
     else:
         result = run_command(f"tailscale {action}")
 
-    if result.returncode == 0:
-        return result.stdout
-    return (
-        f"Error: {result.stderr}\n\n"
-        "Tip: if Tailscale is not enabled, run ujust_run('enable-tailscale') first."
-    )
+    if result.returncode != 0:
+        raise ToolError(
+            f"Error: {result.stderr}\n\n"
+            "Tip: if Tailscale is not enabled, run ujust_run('enable-tailscale') first."
+        )
+    return result.stdout

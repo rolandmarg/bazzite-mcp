@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Literal
 
-from bazzite_mcp.runner import run_audited, run_command
+from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
 INSTALL_POLICY = """Bazzite 6-tier install hierarchy (official docs.bazzite.gg):
@@ -73,7 +73,7 @@ def _install_with_method(package: str, method: str) -> str:
         "rpm-ostree": f"rpm-ostree uninstall {pkg}",
     }
     if method not in method_commands:
-        return f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
+        raise ToolError(f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}")
 
     result = run_audited(
         method_commands[method],
@@ -85,7 +85,7 @@ def _install_with_method(package: str, method: str) -> str:
     if result.stderr:
         output += f"\n{result.stderr}"
     if result.returncode != 0:
-        return f"Installation failed (exit {result.returncode}):\n{output}"
+        raise ToolError(f"Installation failed (exit {result.returncode}):\n{output}")
     return f"Installed '{package}' via {method}:\n{output}"
 
 
@@ -103,7 +103,7 @@ def remove_package(package: str, method: Literal["flatpak", "brew", "rpm-ostree"
         "rpm-ostree": f"rpm-ostree install {pkg}",
     }
     if method not in method_commands:
-        return f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
+        raise ToolError(f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}")
 
     result = run_audited(
         method_commands[method],
@@ -111,10 +111,9 @@ def remove_package(package: str, method: Literal["flatpak", "brew", "rpm-ostree"
         args={"package": package, "method": method},
         rollback=reinstall_commands.get(method),
     )
-    output = result.stdout
     if result.returncode != 0:
-        output = f"Removal failed (exit {result.returncode}):\n{output}\n{result.stderr}"
-    return output
+        raise ToolError(f"Removal failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}")
+    return result.stdout
 
 
 def search_package(package: str) -> str:
@@ -178,4 +177,4 @@ def update_packages(source: Literal["system", "flatpak", "brew"] | None = None) 
     if source == "brew":
         result = run_audited("brew upgrade", tool="update_packages", args={"source": "brew"})
         return f"Brew update:\n{result.stdout}"
-    return f"Unknown source '{source}'. Supported: flatpak, brew, system, all."
+    raise ToolError(f"Unknown source '{source}'. Supported: flatpak, brew, system, all.")

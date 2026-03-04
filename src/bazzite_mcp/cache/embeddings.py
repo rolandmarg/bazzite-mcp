@@ -73,7 +73,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | None:
+async def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | None:
     """Generate embeddings via Google Gemini REST API (free tier)."""
     cfg = load_config()
     model = cfg.embedding_model
@@ -90,20 +90,20 @@ def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | None:
         })
 
     try:
-        response = httpx.post(
-            f"{base_url}/models/{model}:batchEmbedContents",
-            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-            json={"requests": requests},
-            timeout=120,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return [emb["values"] for emb in data["embeddings"]]
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(
+                f"{base_url}/models/{model}:batchEmbedContents",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json={"requests": requests},
+            )
+            response.raise_for_status()
+            data = response.json()
+            return [emb["values"] for emb in data["embeddings"]]
     except Exception:
         return None
 
 
-def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float]] | None:
+async def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float]] | None:
     """Generate query embeddings via Gemini (uses RETRIEVAL_QUERY task type)."""
     cfg = load_config()
     model = cfg.embedding_model
@@ -119,42 +119,42 @@ def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float]] | N
         })
 
     try:
-        response = httpx.post(
-            f"{base_url}/models/{model}:batchEmbedContents",
-            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-            json={"requests": requests},
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return [emb["values"] for emb in data["embeddings"]]
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{base_url}/models/{model}:batchEmbedContents",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json={"requests": requests},
+            )
+            response.raise_for_status()
+            data = response.json()
+            return [emb["values"] for emb in data["embeddings"]]
     except Exception:
         return None
 
 
-def _embed_openai(texts: list[str], api_key: str) -> list[list[float]] | None:
+async def _embed_openai(texts: list[str], api_key: str) -> list[list[float]] | None:
     """Generate embeddings via OpenAI-compatible API."""
     cfg = load_config()
     try:
-        response = httpx.post(
-            "https://api.openai.com/v1/embeddings",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "input": texts,
-                "model": cfg.embedding_model,
-                "dimensions": cfg.embedding_dimensions,
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
-        results = sorted(data["data"], key=lambda x: x["index"])
-        return [r["embedding"] for r in results]
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "input": texts,
+                    "model": cfg.embedding_model,
+                    "dimensions": cfg.embedding_dimensions,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            results = sorted(data["data"], key=lambda x: x["index"])
+            return [r["embedding"] for r in results]
     except Exception:
         return None
 
 
-def generate_embeddings(texts: list[str], query: bool = False) -> list[list[float]] | None:
+async def generate_embeddings(texts: list[str], query: bool = False) -> list[list[float]] | None:
     """Call the configured embedding API. Returns None if unavailable.
 
     Args:
@@ -168,12 +168,12 @@ def generate_embeddings(texts: list[str], query: bool = False) -> list[list[floa
     cfg = load_config()
     if cfg.embedding_provider == "gemini":
         if query:
-            return _embed_gemini_query(texts, api_key)
-        return _embed_gemini(texts, api_key)
-    return _embed_openai(texts, api_key)
+            return await _embed_gemini_query(texts, api_key)
+        return await _embed_gemini(texts, api_key)
+    return await _embed_openai(texts, api_key)
 
 
-def embed_pages(conn: Connection) -> tuple[int, list[str]]:
+async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     """Generate embeddings for all pages that don't have them yet.
 
     Invalidates embeddings from a different model before re-embedding.
@@ -224,7 +224,7 @@ def embed_pages(conn: Connection) -> tuple[int, list[str]]:
                 all_chunks.append((page_id, idx, chunk))
 
         texts = [chunk[2] for chunk in all_chunks]
-        vectors = generate_embeddings(texts)
+        vectors = await generate_embeddings(texts)
 
         if vectors is None:
             errors.append(f"Embedding API call failed for batch starting at page {batch[0]['id']}")
@@ -248,12 +248,19 @@ def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
 
     Embeds the query via API, then ranks stored chunks by cosine similarity.
     Filters out results below MIN_SIMILARITY_THRESHOLD.
+
+    Note: This remains synchronous because it's called from tools that need
+    immediate results and the query embedding is a single fast API call.
+    For the query path, we use synchronous httpx to avoid requiring await.
     """
-    query_vecs = generate_embeddings([query], query=True)
-    if query_vecs is None:
+    api_key = _get_api_key()
+    if not api_key:
         return []
 
-    query_vec = query_vecs[0]
+    cfg = load_config()
+    query_vec = _sync_embed_query(query, api_key, cfg)
+    if query_vec is None:
+        return []
 
     rows = conn.execute(
         "SELECT e.chunk_text, e.embedding, e.dimensions, p.url, p.title, p.section "
@@ -279,3 +286,44 @@ def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:limit]]
+
+
+def _sync_embed_query(query: str, api_key: str, cfg) -> list[float] | None:
+    """Synchronous single-query embedding for search-time use."""
+    if cfg.embedding_provider == "gemini":
+        model = cfg.embedding_model
+        base_url = "https://generativelanguage.googleapis.com/v1beta"
+        try:
+            response = httpx.post(
+                f"{base_url}/models/{model}:batchEmbedContents",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json={"requests": [{
+                    "model": f"models/{model}",
+                    "content": {"parts": [{"text": query}]},
+                    "outputDimensionality": cfg.embedding_dimensions,
+                    "taskType": "RETRIEVAL_QUERY",
+                }]},
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["embeddings"][0]["values"]
+        except Exception:
+            return None
+    else:
+        try:
+            response = httpx.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "input": [query],
+                    "model": cfg.embedding_model,
+                    "dimensions": cfg.embedding_dimensions,
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["data"][0]["embedding"]
+        except Exception:
+            return None

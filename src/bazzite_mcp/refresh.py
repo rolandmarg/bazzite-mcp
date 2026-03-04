@@ -3,11 +3,13 @@
 Used by the systemd timer: python -m bazzite_mcp.refresh
 """
 
+import asyncio
+
 from bazzite_mcp.tools.docs import refresh_docs_cache
 
 
 def main() -> None:
-    print(refresh_docs_cache())
+    print(asyncio.run(refresh_docs_cache()))
 
 
 if __name__ == "__main__":
