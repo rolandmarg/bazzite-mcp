@@ -10,11 +10,15 @@ from __future__ import annotations
 import os
 import re
 import struct
+import logging
 from sqlite3 import Connection
 
 import httpx
 
 from bazzite_mcp.config import load_config
+
+
+logger = logging.getLogger(__name__)
 
 # Minimum cosine similarity to include in search results
 MIN_SIMILARITY_THRESHOLD = 0.3
@@ -239,6 +243,9 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     cfg = load_config()
     api_key = _get_api_key()
     if not api_key:
+        logger.info(
+            "Skipping embeddings: missing API key env %s", cfg.embedding_api_key_env
+        )
         return 0, [
             f"No API key found in ${cfg.embedding_api_key_env}. Set it to enable semantic search."
         ]
@@ -251,6 +258,7 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
         (model_id,),
     ).fetchone()
     if stale and stale["cnt"] > 0:
+        logger.info("Removing stale embeddings for previous model")
         conn.execute(
             "DELETE FROM embeddings WHERE COALESCE(model, '') != ?", (model_id,)
         )
@@ -264,6 +272,7 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     ).fetchall()
 
     if not rows:
+        logger.debug("No pages need embedding")
         return 0, []
 
     errors: list[str] = []
@@ -295,6 +304,10 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
         if vectors is None:
             errors.append(
                 f"Embedding API call failed for batch starting at page {batch[0]['id']}"
+            )
+            logger.warning(
+                "Embedding API call failed for batch starting at page %s",
+                batch[0]["id"],
             )
             continue
 
@@ -332,6 +345,7 @@ async def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[
     cfg = load_config()
     query_vec = await _embed_query(query, api_key, cfg)
     if query_vec is None:
+        logger.warning("Query embedding generation failed")
         return []
 
     rows = conn.execute(

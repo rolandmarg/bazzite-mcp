@@ -1,4 +1,5 @@
 import re
+import logging
 from datetime import datetime, timezone
 
 from bazzite_mcp.config import load_config
@@ -8,6 +9,9 @@ from bazzite_mcp.db import (
     get_db_path,
     migrate_cache_schema,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 SYNONYMS: dict[str, list[str]] = {
@@ -130,6 +134,7 @@ class DocsCache:
         return (datetime.now(timezone.utc) - oldest).total_seconds() > ttl_seconds
 
     def clear(self) -> None:
+        logger.info("Clearing docs cache tables")
         self._conn.execute("DELETE FROM embeddings")
         self._conn.execute("DELETE FROM pages")
         self._conn.execute("DELETE FROM pages_fts")

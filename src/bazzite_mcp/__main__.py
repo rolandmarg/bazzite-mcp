@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import signal
 import sys
 
@@ -34,6 +35,15 @@ def _signal_handler(signum: int, _frame: object) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=getattr(
+            logging,
+            os.environ.get("BAZZITE_MCP_LOG_LEVEL", "INFO").upper(),
+            logging.INFO,
+        ),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
     atexit.register(_cleanup)

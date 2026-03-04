@@ -1,6 +1,7 @@
 """Persistent configuration for bazzite-mcp."""
 
 import os
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,9 @@ try:
     import tomllib
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
+
+
+logger = logging.getLogger(__name__)
 
 
 def _config_path() -> Path:
@@ -28,6 +32,7 @@ def _load_env_file() -> None:
     """
     path = _env_file_path()
     if not path.exists():
+        logger.debug("No env file found at %s", path)
         return
 
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -44,6 +49,7 @@ def _load_env_file() -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+            logger.debug("Loaded env var %s from %s", key, path)
 
 
 @dataclass
@@ -119,6 +125,7 @@ def load_config() -> Config:
             with open(path, "rb") as f:
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as exc:
+            logger.error("Invalid TOML in %s: %s", path, exc)
             raise ValueError(f"Invalid TOML in {path}: {exc}") from exc
         for key, value in data.items():
             if hasattr(cfg, key):
@@ -134,6 +141,11 @@ def load_config() -> Config:
                 pass  # Ignore invalid env var values, keep default
 
     cfg.validate()
+    logger.debug(
+        "Loaded bazzite-mcp config: repo=%s crawl_max=%s",
+        cfg.repo_slug,
+        cfg.crawl_max_pages,
+    )
 
     _config = cfg
     return cfg

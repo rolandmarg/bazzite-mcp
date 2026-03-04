@@ -1,5 +1,6 @@
 import re
 import asyncio
+import logging
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -10,6 +11,9 @@ from bazzite_mcp.cache.docs_cache import DocsCache
 from bazzite_mcp.cache.embeddings import embed_pages, semantic_search
 from bazzite_mcp.config import load_config
 from bazzite_mcp.runner import ToolError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_content(soup: BeautifulSoup) -> str | None:
@@ -80,6 +84,7 @@ async def _ensure_fresh_docs_cache(
     if not reason:
         return cache, ""
 
+    logger.info("Docs cache %s; triggering auto-refresh", reason)
     report = await refresh_docs_cache(ctx)
     refreshed_cache = DocsCache()
     if refreshed_cache.page_count() == 0:
@@ -308,6 +313,7 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
     cfg = load_config()
     cache = DocsCache()
     cache.clear()
+    logger.info("Starting docs cache refresh (max_pages=%s)", cfg.crawl_max_pages)
 
     fetched = 0
     errors: list[str] = []
@@ -411,6 +417,7 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
                 )
     except Exception as exc:
         errors.append(f"GitHub releases: {exc}")
+        logger.warning("Failed to refresh changelogs: %s", exc)
 
     # Generate embeddings if API key is available
     embedded, embed_errors = await embed_pages(cache._conn)
@@ -422,8 +429,12 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
     elif not embed_errors:
         report += "\nEmbeddings: skipped (no new pages to embed)."
     if errors:
+        logger.warning("Docs cache refresh completed with %s errors", len(errors))
         report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(
             f"  - {err}" for err in errors
         )
+    logger.info(
+        "Docs cache refresh completed: fetched=%s visited=%s", fetched, len(visited)
+    )
     report += f"\nSkipped {len(visited) - fetched} pages (no content or errors)."
     return report
