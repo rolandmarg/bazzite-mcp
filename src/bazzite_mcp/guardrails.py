@@ -34,6 +34,7 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "git",
         "gnome-randr",
         "grep",
+        "kscreen-doctor",
         "head",
         "hostnamectl",
         "hostname",

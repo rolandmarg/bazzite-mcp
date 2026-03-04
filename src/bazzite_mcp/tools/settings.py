@@ -44,8 +44,18 @@ def set_audio_output(device: str | None = None) -> str:
     return f"Audio output switched to: {device}"
 
 
+def _is_kde() -> bool:
+    import os
+    return "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+
+
 def get_display_config() -> str:
     """Query current display setup."""
+    if _is_kde():
+        result = run_command("kscreen-doctor -o")
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout
+
     result = run_command("gnome-randr")
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout
@@ -65,6 +75,10 @@ def set_display_config(
 ) -> str:
     """Change display resolution, refresh rate, or scaling."""
     soutput = shlex.quote(output)
+
+    if _is_kde():
+        return _set_display_config_kde(soutput, output, resolution, refresh, scale)
+
     if scale:
         result = run_audited(
             f"gsettings set org.gnome.desktop.interface text-scaling-factor {shlex.quote(scale)}",
@@ -107,6 +121,67 @@ def set_display_config(
 
     return (
         f"Display '{output}' configured: "
+        f"resolution={resolution}, refresh={refresh}, scale={scale}"
+    )
+
+
+def _set_display_config_kde(
+    soutput: str,
+    output: str,
+    resolution: str | None,
+    refresh: str | None,
+    scale: str | None,
+) -> str:
+    """Apply display config changes via kscreen-doctor (KDE Wayland)."""
+    # kscreen-doctor uses output index or name, e.g. "output.2.mode.28"
+    # First resolve the output index from kscreen-doctor
+    probe = run_command("kscreen-doctor -o")
+    if probe.returncode != 0:
+        raise ToolError(f"kscreen-doctor failed: {probe.stderr}")
+
+    # Find the output index for the requested output name
+    output_idx = None
+    for line in probe.stdout.splitlines():
+        if f" {output} " in line or line.strip().endswith(output):
+            parts = line.split()
+            for part in parts:
+                if part.isdigit():
+                    output_idx = part
+                    break
+            break
+    if output_idx is None:
+        raise ToolError(
+            f"Output '{output}' not found in kscreen-doctor. "
+            f"Available:\n{probe.stdout}"
+        )
+
+    changes: list[str] = []
+
+    if resolution and refresh:
+        mode_str = f"{resolution}@{refresh}"
+        changes.append(f"output.{output_idx}.mode.{mode_str}")
+    elif resolution:
+        changes.append(f"output.{output_idx}.mode.{resolution}")
+    elif refresh:
+        changes.append(f"output.{output_idx}.mode.{refresh}")
+
+    if scale:
+        changes.append(f"output.{output_idx}.scale.{shlex.quote(scale)}")
+
+    if not changes:
+        raise ToolError("No resolution, refresh, or scale specified.")
+
+    cmd = "kscreen-doctor " + " ".join(changes)
+    result = run_audited(
+        cmd,
+        tool="set_display_config",
+        args={"output": output, "resolution": resolution, "refresh": refresh, "scale": scale, "via": "kscreen-doctor"},
+    )
+    if result.returncode != 0:
+        raise ToolError(f"kscreen-doctor failed: {result.stderr}")
+
+    return (
+        f"Display '{output}' configured via kscreen-doctor: "
         f"resolution={resolution}, refresh={refresh}, scale={scale}"
     )
 
