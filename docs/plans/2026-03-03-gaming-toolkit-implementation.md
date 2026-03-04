@@ -8,6 +8,11 @@
 
 **Tech Stack:** Python 3.11+, `vdf` library (Valve KeyValues parser), `httpx` (existing), SQLite (existing `docs_cache.db`)
 
+**API verification (2026-03-03):**
+- ProtonDB summary: `GET https://www.protondb.com/api/v1/reports/summaries/{appId}.json` — **verified working**, returns `{tier, score, confidence, total, trendingTier, bestReportedTier}`
+- ProtonDB individual reports: **no public API exists** — community API at protondb.max-p.me has stale 2019 data, unusable
+- PCGamingWiki Cargo API: **verified working** — `api.php?action=cargoquery&tables=Infobox_game&fields=...&format=json`
+
 ---
 
 ### Task 1: Add `vdf` dependency
@@ -83,7 +88,6 @@ In `src/bazzite_mcp/db.py`, append to `CACHE_SCHEMA` string (before the closing 
 CREATE TABLE IF NOT EXISTS game_reports (
     app_id INTEGER PRIMARY KEY,
     protondb_summary TEXT,
-    protondb_reports TEXT,
     pcgamingwiki_data TEXT,
     fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -116,7 +120,10 @@ Create `tests/test_tools_gaming.py`:
 ```python
 from __future__ import annotations
 
-from unittest.mock import patch, mock_open
+import os
+from unittest.mock import patch
+
+import vdf
 
 from bazzite_mcp.tools.gaming import steam_library
 
@@ -150,9 +157,10 @@ APP_MANIFEST_ACF = '''"AppState"
 @patch("bazzite_mcp.tools.gaming._find_steam_root")
 @patch("bazzite_mcp.tools.gaming._read_vdf_file")
 @patch("bazzite_mcp.tools.gaming._list_acf_files")
-def test_steam_library_lists_games(mock_list_acf, mock_read_vdf, mock_root) -> None:
-    import vdf
-
+@patch("os.path.exists", return_value=True)
+def test_steam_library_lists_games(
+    mock_exists, mock_list_acf, mock_read_vdf, mock_root
+) -> None:
     mock_root.return_value = "/home/user/.local/share/Steam"
     mock_read_vdf.side_effect = [
         vdf.loads(LIBRARY_FOLDERS_VDF),  # libraryfolders.vdf
@@ -168,9 +176,10 @@ def test_steam_library_lists_games(mock_list_acf, mock_read_vdf, mock_root) -> N
 @patch("bazzite_mcp.tools.gaming._find_steam_root")
 @patch("bazzite_mcp.tools.gaming._read_vdf_file")
 @patch("bazzite_mcp.tools.gaming._list_acf_files")
-def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
-    import vdf
-
+@patch("os.path.exists", return_value=True)
+def test_steam_library_filter_match(
+    mock_exists, mock_list_acf, mock_read_vdf, mock_root
+) -> None:
     mock_root.return_value = "/home/user/.local/share/Steam"
     mock_read_vdf.side_effect = [
         vdf.loads(LIBRARY_FOLDERS_VDF),
@@ -178,18 +187,26 @@ def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
     ]
     mock_list_acf.return_value = ["appmanifest_1091500.acf"]
 
-    result = steam_library(filter="cyber")
+    result = steam_library(name_filter="cyber")
     assert "Cyberpunk 2077" in result
 
-    # Reset mocks for miss case
+
+@patch("bazzite_mcp.tools.gaming._find_steam_root")
+@patch("bazzite_mcp.tools.gaming._read_vdf_file")
+@patch("bazzite_mcp.tools.gaming._list_acf_files")
+@patch("os.path.exists", return_value=True)
+def test_steam_library_filter_miss(
+    mock_exists, mock_list_acf, mock_read_vdf, mock_root
+) -> None:
+    mock_root.return_value = "/home/user/.local/share/Steam"
     mock_read_vdf.side_effect = [
         vdf.loads(LIBRARY_FOLDERS_VDF),
         vdf.loads(APP_MANIFEST_ACF),
     ]
     mock_list_acf.return_value = ["appmanifest_1091500.acf"]
 
-    result = steam_library(filter="halflife")
-    assert "No games found" in result or "0 games" in result.lower()
+    result = steam_library(name_filter="halflife")
+    assert "No games found" in result
 
 
 @patch("bazzite_mcp.tools.gaming._find_steam_root")
@@ -197,7 +214,7 @@ def test_steam_library_no_steam(mock_root) -> None:
     mock_root.return_value = None
 
     result = steam_library()
-    assert "not found" in result.lower() or "not installed" in result.lower()
+    assert "not found" in result.lower()
 ```
 
 **Step 2: Run tests to verify they fail**
@@ -215,15 +232,23 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
+import httpx
 import vdf
 from mcp.server.fastmcp.exceptions import ToolError
+
+from bazzite_mcp.audit import AuditLog
+from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
 
 logger = logging.getLogger(__name__)
 
 
 # --- Steam file helpers ---
+
 
 def _find_steam_root() -> str | None:
     """Find the Steam installation root directory."""
@@ -247,20 +272,27 @@ def _read_vdf_file(path: str) -> dict:
 def _list_acf_files(steamapps_dir: str) -> list[str]:
     """List appmanifest ACF files in a steamapps directory."""
     try:
-        return [f for f in os.listdir(steamapps_dir) if f.startswith("appmanifest_") and f.endswith(".acf")]
+        return [
+            f
+            for f in os.listdir(steamapps_dir)
+            if f.startswith("appmanifest_") and f.endswith(".acf")
+        ]
     except OSError:
         return []
 
 
-def steam_library(filter: str | None = None) -> str:
+def steam_library(name_filter: str | None = None) -> str:
     """List installed Steam games with app ID, name, and install size.
 
     Parses Steam library folders and app manifests directly.
-    Optional filter for name substring matching (case-insensitive).
+    Optional name_filter for name substring matching (case-insensitive).
     """
     root = _find_steam_root()
     if not root:
-        return "Steam not found. Checked ~/.steam/steam, ~/.local/share/Steam, and Flatpak Steam paths."
+        return (
+            "Steam not found. Checked ~/.steam/steam, "
+            "~/.local/share/Steam, and Flatpak Steam paths."
+        )
 
     # Find all library folders
     lib_vdf_path = os.path.join(root, "config", "libraryfolders.vdf")
@@ -296,21 +328,20 @@ def steam_library(filter: str | None = None) -> str:
             name = app_state.get("name", "Unknown")
             app_id = app_state.get("appid", "?")
             size_bytes = int(app_state.get("SizeOnDisk", 0))
-            size_gb = f"{size_bytes / (1024**3):.1f} GB" if size_bytes > 0 else "unknown"
+            size_gb = (
+                f"{size_bytes / (1024**3):.1f} GB" if size_bytes > 0 else "unknown"
+            )
 
-            if filter and filter.lower() not in name.lower():
+            if name_filter and name_filter.lower() not in name.lower():
                 continue
 
-            games.append({
-                "app_id": app_id,
-                "name": name,
-                "size": size_gb,
-                "library": lib_path,
-            })
+            games.append(
+                {"app_id": app_id, "name": name, "size": size_gb, "library": lib_path}
+            )
 
     if not games:
-        if filter:
-            return f"No games found matching '{filter}'."
+        if name_filter:
+            return f"No games found matching '{name_filter}'."
         return "No games installed in Steam."
 
     games.sort(key=lambda g: g["name"].lower())
@@ -321,7 +352,7 @@ def steam_library(filter: str | None = None) -> str:
 **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/kira/bazzite-mcp && uv run pytest tests/test_tools_gaming.py -v`
-Expected: All 3 tests pass
+Expected: All 4 tests pass
 
 **Step 5: Run full test suite**
 
@@ -341,8 +372,9 @@ git commit -m "feat: add steam_library tool — parses VDF/ACF for installed gam
 
 **Files:**
 - Modify: `src/bazzite_mcp/tools/gaming.py`
-- Modify: `src/bazzite_mcp/cache/docs_cache.py`
 - Test: `tests/test_tools_gaming.py`
+
+**Note:** ProtonDB has no individual reports API. We use the summary endpoint (verified working) + PCGamingWiki Cargo API for structured game data.
 
 **Step 1: Write the failing tests**
 
@@ -350,53 +382,34 @@ Add to `tests/test_tools_gaming.py`:
 
 ```python
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from bazzite_mcp.tools.gaming import game_reports
 
 
 PROTONDB_SUMMARY = {
     "tier": "gold",
-    "score": 0.72,
+    "score": 0.75,
     "confidence": "strong",
-    "trendingTier": "gold",
+    "total": 2511,
+    "trendingTier": "platinum",
     "bestReportedTier": "platinum",
-    "provisionalTier": "gold",
 }
 
-PROTONDB_REPORTS = [
-    {
-        "rating": "gold",
-        "protonVersion": "GE-Proton9-20",
-        "os": "Bazzite",
-        "gpu": "NVIDIA RTX 3060 Ti",
-        "notes": "Works great with GE-Proton. Use gamescope -F fsr for best results.",
-    },
-    {
-        "rating": "silver",
-        "protonVersion": "Proton 9.0-4",
-        "os": "Fedora",
-        "gpu": "AMD RX 7800 XT",
-        "notes": "Minor stuttering in cutscenes.",
-    },
-]
 
-
-@patch("bazzite_mcp.tools.gaming._fetch_protondb_summary")
-@patch("bazzite_mcp.tools.gaming._fetch_protondb_reports")
+@patch("bazzite_mcp.tools.gaming._fetch_protondb_summary", new_callable=AsyncMock)
 @patch("bazzite_mcp.tools.gaming._get_cached_reports")
 @patch("bazzite_mcp.tools.gaming._cache_reports")
 def test_game_reports_fetches_and_formats(
-    mock_cache_store, mock_cache_get, mock_fetch_reports, mock_fetch_summary
+    mock_cache_store, mock_cache_get, mock_fetch_summary
 ) -> None:
     mock_cache_get.return_value = None  # cache miss
     mock_fetch_summary.return_value = PROTONDB_SUMMARY
-    mock_fetch_reports.return_value = PROTONDB_REPORTS
 
     result = asyncio.run(game_reports(app_id=1091500))
     assert "gold" in result.lower()
-    assert "GE-Proton" in result
-    assert "RTX 3060" in result
+    assert "platinum" in result.lower()  # bestReportedTier
+    assert "strong" in result.lower()    # confidence
     mock_cache_store.assert_called_once()
 
 
@@ -404,34 +417,39 @@ def test_game_reports_fetches_and_formats(
 def test_game_reports_uses_cache(mock_cache_get) -> None:
     mock_cache_get.return_value = {
         "protondb_summary": PROTONDB_SUMMARY,
-        "protondb_reports": PROTONDB_REPORTS,
+        "pcgamingwiki_data": None,
     }
 
     result = asyncio.run(game_reports(app_id=1091500))
     assert "gold" in result.lower()
     assert "cached" in result.lower()
+
+
+@patch("bazzite_mcp.tools.gaming._fetch_protondb_summary", new_callable=AsyncMock)
+@patch("bazzite_mcp.tools.gaming._get_cached_reports")
+def test_game_reports_no_data(mock_cache_get, mock_fetch_summary) -> None:
+    mock_cache_get.return_value = None
+    mock_fetch_summary.return_value = None
+
+    result = asyncio.run(game_reports(app_id=9999999))
+    assert "no" in result.lower() and "data" in result.lower()
 ```
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /var/home/kira/bazzite-mcp && uv run pytest tests/test_tools_gaming.py::test_game_reports_fetches_and_formats tests/test_tools_gaming.py::test_game_reports_uses_cache -v`
+Run: `cd /var/home/kira/bazzite-mcp && uv run pytest tests/test_tools_gaming.py::test_game_reports_fetches_and_formats tests/test_tools_gaming.py::test_game_reports_uses_cache tests/test_tools_gaming.py::test_game_reports_no_data -v`
 Expected: FAIL — functions don't exist yet
 
 **Step 3: Implement cache helpers + game_reports**
 
-Add to `src/bazzite_mcp/tools/gaming.py`:
+Add to `src/bazzite_mcp/tools/gaming.py` (below the steam_library code):
 
 ```python
-import time
-
-import httpx
-
-from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
-
 REPORT_CACHE_TTL = 86400  # 24 hours
 
 
 # --- Cache helpers ---
+
 
 def _get_cache_conn():
     db_path = get_db_path("docs_cache.db")
@@ -444,12 +462,12 @@ def _get_cached_reports(app_id: int) -> dict | None:
     conn = _get_cache_conn()
     try:
         row = conn.execute(
-            "SELECT protondb_summary, protondb_reports, pcgamingwiki_data, fetched_at FROM game_reports WHERE app_id = ?",
+            "SELECT protondb_summary, pcgamingwiki_data, fetched_at "
+            "FROM game_reports WHERE app_id = ?",
             (app_id,),
         ).fetchone()
         if not row:
             return None
-        from datetime import datetime, timezone
         fetched_raw = str(row["fetched_at"])
         if fetched_raw.endswith("Z"):
             fetched_raw = fetched_raw.replace("Z", "+00:00")
@@ -460,23 +478,32 @@ def _get_cached_reports(app_id: int) -> dict | None:
         if age > REPORT_CACHE_TTL:
             return None
         return {
-            "protondb_summary": json.loads(row["protondb_summary"]) if row["protondb_summary"] else None,
-            "protondb_reports": json.loads(row["protondb_reports"]) if row["protondb_reports"] else None,
-            "pcgamingwiki_data": json.loads(row["pcgamingwiki_data"]) if row["pcgamingwiki_data"] else None,
+            "protondb_summary": (
+                json.loads(row["protondb_summary"])
+                if row["protondb_summary"]
+                else None
+            ),
+            "pcgamingwiki_data": (
+                json.loads(row["pcgamingwiki_data"])
+                if row["pcgamingwiki_data"]
+                else None
+            ),
         }
     finally:
         conn.close()
 
 
-def _cache_reports(app_id: int, summary: dict | None, reports: list | None, pcgw: dict | None = None) -> None:
+def _cache_reports(
+    app_id: int, summary: dict | None, pcgw: dict | None = None
+) -> None:
     conn = _get_cache_conn()
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO game_reports (app_id, protondb_summary, protondb_reports, pcgamingwiki_data) VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO game_reports "
+            "(app_id, protondb_summary, pcgamingwiki_data) VALUES (?, ?, ?)",
             (
                 app_id,
                 json.dumps(summary) if summary else None,
-                json.dumps(reports) if reports else None,
                 json.dumps(pcgw) if pcgw else None,
             ),
         )
@@ -487,10 +514,13 @@ def _cache_reports(app_id: int, summary: dict | None, reports: list | None, pcgw
 
 # --- Network fetchers ---
 
+
 async def _fetch_protondb_summary(app_id: int) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"https://www.protondb.com/api/v1/reports/summaries/{app_id}.json")
+            resp = await client.get(
+                f"https://www.protondb.com/api/v1/reports/summaries/{app_id}.json"
+            )
             resp.raise_for_status()
             return resp.json()
     except Exception as exc:
@@ -498,48 +528,35 @@ async def _fetch_protondb_summary(app_id: int) -> dict | None:
         return None
 
 
-async def _fetch_protondb_reports(app_id: int) -> list | None:
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://www.protondb.com/api/v1/reports/summaries/{app_id}.json".replace(
-                    "summaries", "reports"
-                ).replace("{app_id}", str(app_id))
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            # Return top 10 most recent reports
-            if isinstance(data, list):
-                return data[:10]
-            return data.get("reports", data.get("results", []))[:10]
-    except Exception as exc:
-        logger.warning("ProtonDB reports fetch failed for %s: %s", app_id, exc)
-        return None
-
-
 async def game_reports(app_id: int) -> str:
     """Fetch community compatibility and optimization data for a Steam game.
 
-    Queries ProtonDB for compatibility tier and user reports with settings recommendations.
+    Queries ProtonDB for compatibility tier and summary.
     Results are cached for 24 hours.
     """
     # Check cache first
     cached = _get_cached_reports(app_id)
     if cached:
-        return _format_reports(app_id, cached["protondb_summary"], cached["protondb_reports"], from_cache=True)
+        return _format_reports(
+            app_id, cached["protondb_summary"], from_cache=True
+        )
 
     # Fetch fresh data
     summary = await _fetch_protondb_summary(app_id)
-    reports = await _fetch_protondb_reports(app_id)
 
-    if not summary and not reports:
-        return f"No ProtonDB data found for app ID {app_id}. The game may not have Linux compatibility reports yet."
+    if not summary:
+        return (
+            f"No ProtonDB data found for app ID {app_id}. "
+            "The game may not have Linux compatibility reports yet."
+        )
 
-    _cache_reports(app_id, summary, reports)
-    return _format_reports(app_id, summary, reports, from_cache=False)
+    _cache_reports(app_id, summary)
+    return _format_reports(app_id, summary, from_cache=False)
 
 
-def _format_reports(app_id: int, summary: dict | None, reports: list | None, from_cache: bool = False) -> str:
+def _format_reports(
+    app_id: int, summary: dict | None, from_cache: bool = False
+) -> str:
     parts: list[str] = []
     cache_note = " (cached)" if from_cache else ""
 
@@ -547,25 +564,15 @@ def _format_reports(app_id: int, summary: dict | None, reports: list | None, fro
         tier = summary.get("tier", "unknown")
         confidence = summary.get("confidence", "unknown")
         best = summary.get("bestReportedTier", "unknown")
+        trending = summary.get("trendingTier", "unknown")
+        total = summary.get("total", "?")
         parts.append(
             f"## ProtonDB — App {app_id}{cache_note}\n"
             f"**Rating:** {tier.upper()}\n"
-            f"**Confidence:** {confidence}\n"
-            f"**Best reported:** {best}"
+            f"**Confidence:** {confidence} ({total} reports)\n"
+            f"**Best reported:** {best}\n"
+            f"**Trending:** {trending}"
         )
-
-    if reports:
-        parts.append("### User Reports (most recent)")
-        for report in reports[:5]:
-            rating = report.get("rating", "?")
-            proton = report.get("protonVersion", "?")
-            gpu = report.get("gpu", "?")
-            os_name = report.get("os", "?")
-            notes = report.get("notes", "No notes")
-            parts.append(
-                f"- **{rating}** | Proton: {proton} | GPU: {gpu} | OS: {os_name}\n"
-                f"  {notes}"
-            )
 
     return "\n\n".join(parts) if parts else f"No data available for app {app_id}."
 ```
@@ -573,13 +580,13 @@ def _format_reports(app_id: int, summary: dict | None, reports: list | None, fro
 **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/kira/bazzite-mcp && uv run pytest tests/test_tools_gaming.py -v`
-Expected: All 5 tests pass
+Expected: All 7 tests pass
 
 **Step 5: Commit**
 
 ```bash
 git add src/bazzite_mcp/tools/gaming.py tests/test_tools_gaming.py
-git commit -m "feat: add game_reports tool — ProtonDB community data with caching"
+git commit -m "feat: add game_reports tool — ProtonDB summary data with caching"
 ```
 
 ---
@@ -600,18 +607,26 @@ from bazzite_mcp.tools.gaming import game_settings
 
 @patch("bazzite_mcp.tools.gaming._read_mangohud_config")
 def test_game_settings_get(mock_read) -> None:
-    mock_read.return_value = {"fps_limit": "60", "gpu_stats": "1"}
+    mock_read.side_effect = [
+        {"fps_limit": "0"},                         # global config
+        {"fps_limit": "60", "gpu_stats": "1"},      # per-game config (overrides)
+    ]
 
     result = game_settings(action="get", app_id=1091500)
     assert "fps_limit" in result
     assert "60" in result
+    assert "gpu_stats" in result
 
 
 @patch("bazzite_mcp.tools.gaming._write_mangohud_config")
 @patch("bazzite_mcp.tools.gaming._read_mangohud_config")
 @patch("bazzite_mcp.tools.gaming._backup_file")
-def test_game_settings_set_mangohud(mock_backup, mock_read, mock_write) -> None:
+@patch("bazzite_mcp.tools.gaming.AuditLog")
+def test_game_settings_set_mangohud(
+    mock_audit, mock_backup, mock_read, mock_write
+) -> None:
     mock_read.return_value = {}
+    mock_backup.return_value = None  # no existing file to back up
 
     result = game_settings(
         action="set",
@@ -620,18 +635,20 @@ def test_game_settings_set_mangohud(mock_backup, mock_read, mock_write) -> None:
     )
     assert "fps_limit" in result
     mock_write.assert_called_once()
-    mock_backup.assert_called()
 
 
 @patch("bazzite_mcp.tools.gaming._write_steam_launch_options")
-@patch("bazzite_mcp.tools.gaming._backup_file")
-def test_game_settings_set_launch_options(mock_backup, mock_write) -> None:
+@patch("bazzite_mcp.tools.gaming.AuditLog")
+def test_game_settings_set_launch_options(mock_audit, mock_write) -> None:
+    mock_write.return_value = "/home/user/.steam/steam/userdata/123/config/localconfig.vdf"
+
     result = game_settings(
         action="set",
         app_id=1091500,
         launch_options="gamescope -w 1920 -h 1080 -F fsr -- mangohud %command%",
     )
     assert "launch options" in result.lower()
+    assert "gamescope" in result
     mock_write.assert_called_once()
 ```
 
@@ -642,26 +659,21 @@ Expected: FAIL — functions don't exist
 
 **Step 3: Implement game_settings**
 
-Add to `src/bazzite_mcp/tools/gaming.py`:
+Add to `src/bazzite_mcp/tools/gaming.py` (below the game_reports code):
 
 ```python
-import shutil
-from datetime import datetime, timezone
-from typing import Literal
-
-from bazzite_mcp.audit import AuditLog
-
-
-MANGOHUD_CONFIG_DIR = os.path.join(
-    os.environ.get("XDG_CONFIG_HOME", os.path.join(str(Path.home()), ".config")),
-    "MangoHud",
-)
+def _mangohud_config_dir() -> str:
+    return os.path.join(
+        os.environ.get("XDG_CONFIG_HOME", os.path.join(str(Path.home()), ".config")),
+        "MangoHud",
+    )
 
 
 def _mangohud_config_path(app_id: int | None = None) -> str:
+    base = _mangohud_config_dir()
     if app_id:
-        return os.path.join(MANGOHUD_CONFIG_DIR, f"{app_id}.conf")
-    return os.path.join(MANGOHUD_CONFIG_DIR, "MangoHud.conf")
+        return os.path.join(base, f"{app_id}.conf")
+    return os.path.join(base, "MangoHud.conf")
 
 
 def _read_mangohud_config(path: str) -> dict[str, str]:
@@ -720,7 +732,7 @@ def _find_steam_userdata_dir() -> str | None:
 
 
 def _write_steam_launch_options(app_id: int, options: str) -> str:
-    """Write launch options to Steam's localconfig.vdf."""
+    """Write launch options to Steam's localconfig.vdf. Returns config path."""
     user_dir = _find_steam_userdata_dir()
     if not user_dir:
         raise ToolError("Steam userdata directory not found. Is Steam installed?")
@@ -730,7 +742,6 @@ def _write_steam_launch_options(app_id: int, options: str) -> str:
 
     data = _read_vdf_file(config_path)
 
-    # Navigate to the launch options path
     # Path: UserLocalConfigStore > Software > Valve > Steam > apps > <appid> > LaunchOptions
     apps = (
         data.setdefault("UserLocalConfigStore", {})
@@ -748,6 +759,29 @@ def _write_steam_launch_options(app_id: int, options: str) -> str:
     return config_path
 
 
+def _read_steam_launch_options(app_id: int) -> str | None:
+    """Read current launch options for a game from localconfig.vdf."""
+    user_dir = _find_steam_userdata_dir()
+    if not user_dir:
+        return None
+    config_path = os.path.join(user_dir, "config", "localconfig.vdf")
+    if not os.path.exists(config_path):
+        return None
+    try:
+        data = _read_vdf_file(config_path)
+        apps = (
+            data.get("UserLocalConfigStore", {})
+            .get("Software", {})
+            .get("Valve", {})
+            .get("Steam", {})
+            .get("apps", {})
+        )
+        app_entry = apps.get(str(app_id), {})
+        return app_entry.get("LaunchOptions")
+    except Exception:
+        return None
+
+
 def game_settings(
     action: Literal["get", "set"],
     app_id: int,
@@ -756,7 +790,7 @@ def game_settings(
 ) -> str:
     """Read or write per-game settings (MangoHud config and Steam launch options).
 
-    action='get': Returns current MangoHud config and launch options for this game.
+    action='get': Returns current MangoHud config and Steam launch options for this game.
     action='set': Writes MangoHud config and/or launch options. Creates backups before writing.
     """
     if action == "get":
@@ -773,6 +807,12 @@ def game_settings(
         else:
             parts.append("No MangoHud config found (global or per-game).")
 
+        current_opts = _read_steam_launch_options(app_id)
+        if current_opts:
+            parts.append(f"### Steam Launch Options\n  `{current_opts}`")
+        else:
+            parts.append("No Steam launch options set for this game.")
+
         return "\n".join(parts)
 
     # action == "set"
@@ -788,7 +828,6 @@ def game_settings(
         existing.update(mangohud)
         _write_mangohud_config(mh_path, existing)
 
-        # Audit the change
         try:
             log = AuditLog()
             log.record(
@@ -832,7 +871,7 @@ def game_settings(
 **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/kira/bazzite-mcp && uv run pytest tests/test_tools_gaming.py -v`
-Expected: All 8 tests pass
+Expected: All 10 tests pass
 
 **Step 5: Commit**
 
@@ -848,10 +887,9 @@ git commit -m "feat: add game_settings tool — MangoHud + Steam launch options 
 **Files:**
 - Modify: `src/bazzite_mcp/server.py`
 - Modify: `src/bazzite_mcp/guardrails.py:20-63`
-- Test: `tests/test_tool_registration.py`
 - Test: `tests/test_guardrails.py`
 
-**Step 1: Write failing tests**
+**Step 1: Write failing test**
 
 Add to `tests/test_guardrails.py`:
 
@@ -966,7 +1004,7 @@ mcp = FastMCP(
         "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
         "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
         "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing\n"
-        "7. For gaming: use steam_library to find games, game_reports for community optimization data, "
+        "7. For gaming: use steam_library to find games, game_reports for ProtonDB compatibility data, "
         "game_settings to apply MangoHud/launch options. Use hardware_info + game_reports to make "
         "hardware-aware recommendations. Existing manage_service covers GameMode."
     ),

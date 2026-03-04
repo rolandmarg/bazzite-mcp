@@ -55,7 +55,7 @@ def _list_acf_files(steamapps_dir: str) -> list[str]:
         return []
 
 
-def steam_library(filter: str | None = None) -> str:
+def steam_library(name_filter: str | None = None) -> str:
     """List installed Steam games with app ID and install size."""
     root = _find_steam_root()
     if not root:
@@ -82,7 +82,7 @@ def steam_library(filter: str | None = None) -> str:
     if not library_paths:
         return "No Steam library folders found."
 
-    normalized_filter = filter.lower() if filter else None
+    normalized_filter = name_filter.lower() if name_filter else None
     games: list[dict[str, str]] = []
     for library in library_paths:
         steamapps = os.path.join(library, "steamapps")
@@ -121,8 +121,8 @@ def steam_library(filter: str | None = None) -> str:
             )
 
     if not games:
-        if filter:
-            return f"No games found matching '{filter}'."
+        if name_filter:
+            return f"No games found matching '{name_filter}'."
         return "No games installed in Steam."
 
     games.sort(key=lambda item: item["name"].lower())
@@ -143,7 +143,7 @@ def _get_cached_reports(app_id: int) -> dict[str, Any] | None:
     conn = _get_cache_conn()
     try:
         row = conn.execute(
-            "SELECT protondb_summary, protondb_reports, pcgamingwiki_data, fetched_at "
+            "SELECT protondb_summary, pcgamingwiki_data, fetched_at "
             "FROM game_reports WHERE app_id = ?",
             (app_id,),
         ).fetchone()
@@ -169,9 +169,6 @@ def _get_cached_reports(app_id: int) -> dict[str, Any] | None:
             "protondb_summary": (
                 json.loads(row["protondb_summary"]) if row["protondb_summary"] else None
             ),
-            "protondb_reports": (
-                json.loads(row["protondb_reports"]) if row["protondb_reports"] else None
-            ),
             "pcgamingwiki_data": (
                 json.loads(row["pcgamingwiki_data"])
                 if row["pcgamingwiki_data"]
@@ -185,18 +182,16 @@ def _get_cached_reports(app_id: int) -> dict[str, Any] | None:
 def _cache_reports(
     app_id: int,
     summary: dict[str, Any] | None,
-    reports: list[dict[str, Any]] | None,
     pcgw: dict[str, Any] | None = None,
 ) -> None:
     conn = _get_cache_conn()
     try:
         conn.execute(
             "INSERT OR REPLACE INTO game_reports "
-            "(app_id, protondb_summary, protondb_reports, pcgamingwiki_data) VALUES (?, ?, ?, ?)",
+            "(app_id, protondb_summary, pcgamingwiki_data) VALUES (?, ?, ?)",
             (
                 app_id,
                 json.dumps(summary) if summary else None,
-                json.dumps(reports) if reports else None,
                 json.dumps(pcgw) if pcgw else None,
             ),
         )
@@ -219,30 +214,81 @@ async def _fetch_protondb_summary(app_id: int) -> dict[str, Any] | None:
         return None
 
 
-async def _fetch_protondb_reports(app_id: int) -> list[dict[str, Any]] | None:
+async def _fetch_pcgamingwiki_data(app_id: int) -> dict[str, Any] | None:
     try:
+        params = {
+            "action": "cargoquery",
+            "format": "json",
+            "tables": "Infobox_game,Video,Input,API,Cloud",
+            "join_on": (
+                "Infobox_game._pageName=Video._pageName,"
+                "Infobox_game._pageName=Input._pageName,"
+                "Infobox_game._pageName=API._pageName,"
+                "Infobox_game._pageName=Cloud._pageName"
+            ),
+            "fields": (
+                "Infobox_game._pageName=Page,"
+                "Infobox_game.Steam_AppID,"
+                "Infobox_game.Developers,"
+                "Infobox_game.Publishers,"
+                "Infobox_game.Released,"
+                "Infobox_game.Genres,"
+                "Video.Upscaling,"
+                "Video.Frame_gen,"
+                "Video.Vsync,"
+                "Input.Controller_support,"
+                "Input.Full_controller_support,"
+                "API.Vulkan_versions,"
+                "Cloud.Steam=Steam_cloud"
+            ),
+            "where": f'Infobox_game.Steam_AppID HOLDS "{app_id}"',
+            "limit": "1",
+        }
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
-                f"https://www.protondb.com/api/v1/reports/{app_id}.json"
+                "https://www.pcgamingwiki.com/w/api.php", params=params
             )
             response.raise_for_status()
             payload = response.json()
-            if isinstance(payload, list):
-                return [item for item in payload if isinstance(item, dict)][:10]
-            if isinstance(payload, dict):
-                reports = payload.get("reports", payload.get("results", []))
-                if isinstance(reports, list):
-                    return [item for item in reports if isinstance(item, dict)][:10]
-            return None
+            if not isinstance(payload, dict):
+                return None
+
+            rows = payload.get("cargoquery")
+            if not isinstance(rows, list) or not rows:
+                return None
+
+            first = rows[0]
+            if not isinstance(first, dict):
+                return None
+
+            title = first.get("title")
+            if not isinstance(title, dict):
+                return None
+
+            return {
+                "page": title.get("Page"),
+                "steam_app_id": title.get("Steam AppID"),
+                "developers": title.get("Developers"),
+                "publishers": title.get("Publishers"),
+                "released": title.get("Released"),
+                "genres": title.get("Genres"),
+                "upscaling": title.get("Upscaling"),
+                "frame_gen": title.get("Frame gen"),
+                "vsync": title.get("Vsync"),
+                "controller_support": title.get("Controller support"),
+                "full_controller_support": title.get("Full controller support"),
+                "vulkan_versions": title.get("Vulkan versions"),
+                "steam_cloud": title.get("Steam_cloud"),
+            }
     except Exception as exc:
-        logger.warning("ProtonDB reports fetch failed for %s: %s", app_id, exc)
+        logger.warning("PCGamingWiki fetch failed for %s: %s", app_id, exc)
         return None
 
 
 def _format_reports(
     app_id: int,
     summary: dict[str, Any] | None,
-    reports: list[dict[str, Any]] | None,
+    pcgw: dict[str, Any] | None,
     from_cache: bool = False,
 ) -> str:
     parts: list[str] = []
@@ -252,50 +298,57 @@ def _format_reports(
         tier = str(summary.get("tier", "unknown"))
         confidence = str(summary.get("confidence", "unknown"))
         best = str(summary.get("bestReportedTier", "unknown"))
+        trending = str(summary.get("trendingTier", "unknown"))
+        total = summary.get("total")
         parts.append(
             f"## ProtonDB - App {app_id}{cache_note}\n"
             f"**Rating:** {tier.upper()}\n"
             f"**Confidence:** {confidence}\n"
-            f"**Best reported:** {best}"
+            f"**Trending tier:** {trending}\n"
+            f"**Best reported:** {best}\n"
+            f"**Total reports:** {total if total is not None else 'unknown'}"
         )
 
-    if reports:
-        parts.append("### User Reports (most recent)")
-        for report in reports[:5]:
-            rating = str(report.get("rating", "?"))
-            proton = str(report.get("protonVersion", "?"))
-            gpu = str(report.get("gpu", "?"))
-            os_name = str(report.get("os", "?"))
-            notes = str(report.get("notes", "No notes"))
-            parts.append(
-                f"- **{rating}** | Proton: {proton} | GPU: {gpu} | OS: {os_name}\n"
-                f"  {notes}"
-            )
+    if pcgw:
+        page = pcgw.get("page") or f"App {app_id}"
+        parts.append(
+            f"## PCGamingWiki - {page}\n"
+            f"**Upscaling:** {pcgw.get('upscaling') or 'unknown'}\n"
+            f"**Frame generation:** {pcgw.get('frame_gen') or 'unknown'}\n"
+            f"**VSync:** {pcgw.get('vsync') or 'unknown'}\n"
+            f"**Controller support:** {pcgw.get('controller_support') or 'unknown'}\n"
+            f"**Full controller support:** {pcgw.get('full_controller_support') or 'unknown'}\n"
+            f"**Vulkan:** {pcgw.get('vulkan_versions') or 'not listed'}\n"
+            f"**Steam Cloud:** {pcgw.get('steam_cloud') or 'unknown'}"
+        )
 
     return "\n\n".join(parts) if parts else f"No data available for app {app_id}."
 
 
 async def game_reports(app_id: int) -> str:
-    """Fetch community compatibility data for a Steam game."""
+    """Fetch compatibility and optimization hints for a Steam game.
+
+    Uses ProtonDB summary data and PCGamingWiki structured settings data.
+    """
     cached = _get_cached_reports(app_id)
     if cached:
         return _format_reports(
             app_id,
             cached.get("protondb_summary"),
-            cached.get("protondb_reports"),
+            cached.get("pcgamingwiki_data"),
             from_cache=True,
         )
 
     summary = await _fetch_protondb_summary(app_id)
-    reports = await _fetch_protondb_reports(app_id)
-    if not summary and not reports:
+    pcgw = await _fetch_pcgamingwiki_data(app_id)
+    if not summary and not pcgw:
         return (
-            f"No ProtonDB data found for app ID {app_id}. "
-            "The game may not have Linux compatibility reports yet."
+            f"No community data found for app ID {app_id}. "
+            "Could not retrieve ProtonDB summary or PCGamingWiki entries."
         )
 
-    _cache_reports(app_id, summary, reports)
-    return _format_reports(app_id, summary, reports, from_cache=False)
+    _cache_reports(app_id, summary, pcgw)
+    return _format_reports(app_id, summary, pcgw, from_cache=False)
 
 
 def _mangohud_config_path(app_id: int | None = None) -> str:
