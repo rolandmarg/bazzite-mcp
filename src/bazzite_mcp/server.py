@@ -45,10 +45,16 @@ from bazzite_mcp.tools.ujust import ujust
 mcp = FastMCP(
     "bazzite",
     instructions=(
-        "Bazzite OS management server. "
-        "Check ujust first for system operations. "
-        "Follow 6-tier install hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree. "
-        "Every mutation is audit-logged with rollback support."
+        "Bazzite OS management server. Key principles:\n"
+        "1. Always check ujust first for system operations (ujust_list, ujust_show, ujust_run)\n"
+        "2. Follow the 6-tier install hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree\n"
+        "3. Use query_bazzite_docs to search cached documentation\n"
+        "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
+        "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
+        "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing\n"
+        "7. For gaming: use steam_library to find games, game_reports for community optimization data, "
+        "game_settings to apply MangoHud/launch options. Use hardware_info + game_reports to make "
+        "hardware-aware recommendations. Existing manage_service covers GameMode."
     ),
 )
 

@@ -16,10 +16,10 @@ MCP Client ──stdio──▶ FastMCP (server.py)
               ▼
           audit.py ──▶ audit_log.db
 
-          docs.py  ──▶ httpx ──▶ docs.bazzite.gg / Gemini API
+          docs.py  ──▶ httpx ──▶ docs.bazzite.gg / GitHub API
               │
               ▼
-          docs_cache.db (FTS5 + vector embeddings)
+          docs_cache.db (FTS5 with synonym expansion)
 ```
 
 ## Why it runs on the host
@@ -40,25 +40,26 @@ Every shell command flows through the same path. No tool calls `subprocess` dire
 
 ```
 src/bazzite_mcp/
-├── server.py            # FastMCP instance, registers tools/resources/prompts
+├── server.py            # FastMCP instance, registers 23 tools/resources/prompts
 ├── runner.py            # run_command(), run_audited()
 ├── guardrails.py        # Allowlist + blocked patterns
 ├── audit.py             # SQLite audit trail
 ├── db.py                # SQLite helpers and schemas
 ├── config.py            # Defaults < config.toml < env vars
+├── cleanup.py           # Data cleanup and uninstall utilities
 ├── cache/
-│   ├── docs_cache.py    # FTS5 keyword search
-│   └── embeddings.py    # Vector embeddings + cosine similarity
+│   └── docs_cache.py    # FTS5 keyword search with synonym expansion
 └── tools/
     ├── ujust.py         # ujust (Tier 1)
     ├── packages.py      # flatpak/brew/rpm-ostree
-    ├── services.py      # systemd, networking, firewall
-    ├── containers.py    # distrobox, podman, quadlet, waydroid
-    ├── system.py        # Read-only introspection
-    ├── settings.py      # GNOME/desktop settings
-    ├── docs.py          # Docs search + crawler
-    ├── audit_tools.py   # Audit log query + rollback
-    └── self_improve.py  # GitHub issue/PR loop
+    ├── services.py      # systemd, networking, firewall, tailscale
+    ├── containers.py    # distrobox, podman, quadlet
+    ├── system.py        # System info, storage, health checks, snapshots
+    ├── settings.py      # Desktop settings (theme, audio, display, power)
+    ├── desktop.py       # Screenshots, window management, AT-SPI, input
+    ├── gaming.py        # Steam library, ProtonDB reports, MangoHud
+    ├── docs.py          # Docs search + crawler + changelog
+    └── audit_tools.py   # Audit log query + rollback
 ```
 
 ## Storage
@@ -66,7 +67,7 @@ src/bazzite_mcp/
 Two SQLite databases in `~/.local/share/bazzite-mcp/`:
 
 - **audit_log.db** — every mutating command with timestamp, args, output, and rollback command
-- **docs_cache.db** — crawled pages (FTS5-indexed), vector embeddings (float32 blobs), changelogs
+- **docs_cache.db** — crawled pages (FTS5-indexed), changelogs, game report cache
 
 ## Config
 
@@ -77,7 +78,7 @@ Dataclass defaults  <  ~/.config/bazzite-mcp/config.toml  <  env vars
 ## Dependencies
 
 ```
-fastmcp, httpx, beautifulsoup4
+fastmcp, httpx, beautifulsoup4, vdf
 ```
 
-No LLM SDK. Embeddings via raw HTTP to Gemini/OpenAI. Python 3.11+.
+Python 3.11+.

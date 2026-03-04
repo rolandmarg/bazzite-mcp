@@ -6,177 +6,49 @@ and verification criteria.
 
 ---
 
-## P0: Bug Fixes
+## Completed
 
-### 1. Guardrail false positive on stderr redirects
+### ~~1. Guardrail false positive on stderr redirects~~ DONE
 
-**Problem:** `ujust_list` runs `ujust --summary 2>/dev/null` which matches the
-blocked pattern `>\s*/dev/` — intended to block stdout writes to `/dev/`, not
-stderr suppression.
+Fixed: `/dev/` blocked pattern now uses `(?<![0-9])>>?\s*/dev/` to exclude
+`2>/dev/null` while still blocking `> /dev/sda`.
 
-**Root cause:** The regex `r">\s*/dev/"` matches `2>/dev/null` because it doesn't
-distinguish between stdout (`>`, `1>`) and stderr (`2>`) redirects.
+### ~~4. FTS5 synonym expansion~~ DONE
 
-**Files:** `src/bazzite_mcp/guardrails.py`
+Implemented in `src/bazzite_mcp/cache/docs_cache.py` with `SYNONYMS` dict
+and `_expand_fts5_query()`. Terms are OR-expanded before FTS5 MATCH.
 
-**Steps:**
-1. Change the `/dev/` blocked pattern from `r">\s*/dev/"` to a negative lookbehind
-   that excludes `2>`: `r"(?<![2])>\s*/dev/"` — or use `r"[^2]>\s*/dev/|^>\s*/dev/"`
-2. Also ensure `2>/dev/null` specifically is never blocked (it's standard practice)
-3. Add test cases to `tests/test_guardrails.py`:
-   - `ujust --summary 2>/dev/null` → allowed
-   - `echo foo > /dev/sda` → still blocked
-   - `cat 2>/dev/null` → allowed
+### ~~8. Shell metacharacter guardrails~~ DONE
 
-**Verify:** `uv run pytest tests/test_guardrails.py -v`
+Implemented: `[;|`]|&&|\|\|` and `\$\(` patterns block all shell chaining
+and command substitution.
 
----
+### ~~9. Structured logging~~ PARTIALLY DONE
 
-### 2. DB schema migration for `embeddings.model` column
+`logging.getLogger(__name__)` added to `config.py`, `docs_cache.py`, `gaming.py`.
+Remaining modules still lack logging.
 
-**Problem:** If a user's DB was created before the `model` column was added to the
-`embeddings` table, `embed_pages` fails with `no such column: model`.
+### ~~10. Config validation~~ DONE
 
-**Root cause:** `ensure_tables` uses `CREATE TABLE IF NOT EXISTS` which is a no-op
-when the table already exists with the old schema. There is no migration system.
-
-**Files:** `src/bazzite_mcp/db.py`
-
-**Steps:**
-1. Add a `migrate_cache_schema(conn)` function that runs after `ensure_tables`:
-   ```python
-   def migrate_cache_schema(conn: Connection) -> None:
-       # Check if 'model' column exists in embeddings
-       cols = {row[1] for row in conn.execute("PRAGMA table_info(embeddings)").fetchall()}
-       if "model" not in cols:
-           conn.execute("ALTER TABLE embeddings ADD COLUMN model TEXT DEFAULT ''")
-           conn.commit()
-   ```
-2. Call `migrate_cache_schema` in `DocsCache.__init__` after `ensure_tables`
-3. Add a test that creates a DB with old schema, runs migration, verifies column exists
-
-**Verify:** `uv run pytest tests/test_db.py -v`
+`Config.validate()` in `config.py` checks `cache_ttl_days`, `cache_ttl_hours`,
+and `crawl_max_pages`. Called from `__post_init__`.
 
 ---
 
-## P1: Search Quality
+## Obsolete (removed features)
 
-### 3. Hybrid search (FTS5 + semantic with RRF)
+The following items depended on the embedding/semantic search system which was
+removed in commit `254552a` (refactor: drop self-improve tools and embedding system):
 
-**Problem:** Semantic search returns off-topic results for specific terms (e.g.,
-"browser sandbox" returns unrelated pages). Keyword search misses conceptual matches.
-Neither alone is sufficient.
-
-**Root cause:** Only one search mode is used per query. No fusion of results.
-
-**Files:**
-- `src/bazzite_mcp/tools/docs.py` — new `hybrid_search_docs` tool or merge into existing
-- `src/bazzite_mcp/cache/embeddings.py` — expose scored semantic results
-- `src/bazzite_mcp/cache/docs_cache.py` — expose scored FTS results
-
-**Steps:**
-1. Add a scored FTS search to `DocsCache`:
-   ```python
-   def search_scored(self, query, limit=20) -> list[tuple[float, dict]]:
-       # Return (bm25_rank, result) pairs
-   ```
-2. Ensure `semantic_search` already returns scores (it does via `score` field)
-3. Add Reciprocal Rank Fusion (RRF) function:
-   ```python
-   def reciprocal_rank_fusion(keyword_results, semantic_results, k=60):
-       scores = {}
-       for rank, r in enumerate(keyword_results):
-           scores[r['url']] = scores.get(r['url'], 0) + 1 / (k + rank + 1)
-       for rank, r in enumerate(semantic_results):
-           scores[r['url']] = scores.get(r['url'], 0) + 1 / (k + rank + 1)
-       # Merge and sort by fused score
-   ```
-4. Wire into `query_bazzite_docs` or create a new `hybrid_search_docs` tool
-5. Add tests with mocked results
-
-**Verify:** `uv run pytest tests/test_tools_docs.py -v`
+- ~~2. DB schema migration for `embeddings.model` column~~
+- ~~3. Hybrid search (FTS5 + semantic with RRF)~~
+- ~~5. Better content chunking for embeddings~~
+- ~~6. Make `semantic_search` async end-to-end~~
+- ~~12. Reranking with cross-encoder~~
 
 ---
 
-### 4. FTS5 synonym expansion
-
-**Problem:** Keyword search misses obvious synonyms. Searching "browser sandbox"
-doesn't find "flatpak permissions" or "flatseal" pages.
-
-**Root cause:** FTS5 tokenization is literal — no synonym mapping.
-
-**Files:**
-- `src/bazzite_mcp/cache/docs_cache.py` — query expansion before FTS5 MATCH
-
-**Steps:**
-1. Add a synonym dictionary (Bazzite-specific):
-   ```python
-   SYNONYMS = {
-       "browser": ["firefox", "chromium", "brave"],
-       "sandbox": ["flatpak", "permissions", "flatseal", "distrobox"],
-       "gamepad": ["controller", "joystick", "gamecontroller"],
-       "update": ["upgrade", "rebase", "rpm-ostree"],
-       ...
-   }
-   ```
-2. Expand the FTS5 query with OR-joined synonyms before matching
-3. Keep expansion limited (max 3 synonyms per term) to avoid noise
-4. Add tests
-
-**Verify:** `uv run pytest tests/test_docs_cache.py -v`
-
----
-
-### 5. Better content chunking for embeddings
-
-**Problem:** Current chunking splits on `\n\n` (paragraph boundaries) with a
-character limit. This can split mid-section or create chunks that lack context
-about what page/topic they belong to.
-
-**Root cause:** `_chunk_text` in `embeddings.py` is purely character-based with
-paragraph boundary awareness but no semantic awareness.
-
-**Files:** `src/bazzite_mcp/cache/embeddings.py`
-
-**Steps:**
-1. Prepend page title + section to each chunk as context:
-   ```python
-   prefix = f"[{title} > {section}] "
-   ```
-2. Split on markdown headers (`## `, `### `) first, then fall back to paragraphs
-3. Keep the existing overlap mechanism but apply it after header-based splitting
-4. Re-embed all pages after changing chunk strategy (clear embeddings on upgrade)
-
-**Verify:** `uv run pytest tests/test_embeddings.py -v`
-
----
-
-## P2: Reliability & Robustness
-
-### 6. Make `semantic_search` async end-to-end
-
-**Problem:** `semantic_search` in `embeddings.py` uses synchronous `httpx.post`
-for query embedding (`_sync_embed_query`). This blocks the event loop during
-search.
-
-**Root cause:** The function was kept sync to avoid requiring `await` at the call
-site. But since all tool functions are now async, this can be converted.
-
-**Files:**
-- `src/bazzite_mcp/cache/embeddings.py` — convert `semantic_search` and
-  `_sync_embed_query` to async
-- `src/bazzite_mcp/tools/docs.py` — add `await` to `semantic_search` calls
-
-**Steps:**
-1. Rename `_sync_embed_query` → `_embed_query` and make it `async def`
-2. Convert `semantic_search` to `async def`
-3. Update callers in `docs.py`: `semantic_search_docs` and `query_bazzite_docs`
-   fallback path
-4. Update tests to use `pytest.mark.asyncio`
-
-**Verify:** `uv run pytest tests/test_embeddings.py tests/test_tools_docs.py -v`
-
----
+## P1: Reliability & Performance
 
 ### 7. Concurrent page crawling in `refresh_docs_cache`
 
@@ -189,14 +61,7 @@ sequentially at ~200ms each takes ~20 seconds.
 
 **Steps:**
 1. Use `asyncio.Semaphore` to limit concurrency (e.g., 5 concurrent fetches)
-2. Gather batches of URLs with `asyncio.gather`:
-   ```python
-   sem = asyncio.Semaphore(5)
-   async def fetch_one(url):
-       async with sem:
-           response = await client.get(url)
-           ...
-   ```
+2. Gather batches of URLs with `asyncio.gather`
 3. Process discovered links after each batch completes
 4. Keep progress reporting accurate (increment after each page, not batch)
 
@@ -205,117 +70,67 @@ faster.
 
 ---
 
-### 8. Graceful handling of shell metacharacters in guardrails
-
-**Problem:** The guardrails use regex on raw command strings. Commands with shell
-metacharacters (`;`, `&&`, `||`, `$()`, backticks) are checked as a single string
-but may contain multiple commands.
-
-**Root cause:** `check_command` only extracts and allowlist-checks the *first*
-command prefix. A string like `echo hi; rm -rf /` would pass the allowlist check
-for `echo` but the blocked patterns would need to catch `rm -rf /`.
-
-**Files:** `src/bazzite_mcp/guardrails.py`
-
-**Steps:**
-1. Add shell metacharacter detection as a blocked pattern:
-   ```python
-   (r"[;&|`]", "shell metacharacters (;, &, |, `) are blocked — use separate commands"),
-   (r"\$\(", "command substitution $() is blocked"),
-   ```
-2. This is stricter than per-command checking but eliminates bypass vectors
-3. If legitimate use cases need pipes/chains, add specific allowlist exceptions
-4. Update tests in `test_guardrails.py` and `test_security.py`
-
-**Note:** The security tests (`test_security.py`) already test these vectors.
-Verify the guardrails actually block them at the pattern level, not just the
-allowlist level.
-
-**Verify:** `uv run pytest tests/test_guardrails.py tests/test_security.py -v`
-
----
-
-## P3: Developer Experience & Operations
-
-### 9. Structured logging
-
-**Problem:** Only `runner.py` uses Python logging. Other modules use no logging,
-making it hard to debug issues in production.
-
-**Files:** All files in `src/bazzite_mcp/`
-
-**Steps:**
-1. Add `logger = logging.getLogger(__name__)` to each module
-2. Log at appropriate levels:
-   - `DEBUG`: function entry/exit, cache hits
-   - `INFO`: cache refresh start/end, embedding generation
-   - `WARNING`: fallback paths taken, stale cache used
-   - `ERROR`: API failures, guardrail blocks
-3. Configure root logger in `server.py` or `__main__.py`
-4. Use structured format: `%(asctime)s %(name)s %(levelname)s %(message)s`
-
-**Verify:** Manual — run the server and check log output.
-
----
-
-### 10. Config validation
-
-**Problem:** `Config` accepts any values from TOML/env without validation.
-Invalid values (negative TTL, empty URLs, unknown provider) cause runtime errors
-far from the config loading.
-
-**Files:** `src/bazzite_mcp/config.py`
-
-**Steps:**
-1. Add validation in `__post_init__`:
-   ```python
-   def __post_init__(self):
-       if self.cache_ttl_days < 0:
-           raise ValueError("cache_ttl_days must be non-negative")
-       if self.embedding_provider not in ("gemini", "openai"):
-           raise ValueError(f"Unknown embedding_provider: {self.embedding_provider}")
-       if self.embedding_dimensions < 1:
-           raise ValueError("embedding_dimensions must be positive")
-       if self.crawl_max_pages < 1:
-           raise ValueError("crawl_max_pages must be positive")
-   ```
-2. Add tests for invalid configs in `test_config.py`
-
-**Verify:** `uv run pytest tests/test_config.py -v`
-
----
+## P2: Developer Experience
 
 ### 11. Test coverage for edge cases
 
 **Problem:** Several edge cases lack test coverage:
-- Empty DB semantic search
 - FTS5 query with special characters (already sanitized but untested edge cases)
-- Embedding API timeout/error handling
 - Config loading with malformed TOML
 - `DocsCache.is_stale` with various timestamp formats
 
-**Files:** `tests/test_docs_cache.py`, `tests/test_embeddings.py`, `tests/test_config.py`
+**Files:** `tests/test_docs_cache.py`, `tests/test_config.py`
 
 **Steps:**
 1. Add parametrized tests for `_sanitize_fts5_query` edge cases
-2. Add tests for embedding API failures (mock httpx to raise various exceptions)
-3. Add tests for `is_stale` with edge timestamps (UTC, naive, Z-suffix, +00:00)
-4. Add tests for config with missing/corrupt TOML file
+2. Add tests for `is_stale` with edge timestamps (UTC, naive, Z-suffix, +00:00)
+3. Add tests for config with missing/corrupt TOML file
 
 **Verify:** `uv run pytest tests/ -v --tb=short`
 
 ---
 
+## P3: Code Gaps
+
+### 16. Implement `manage_waydroid` tool
+
+**Problem:** `manage_waydroid` is documented in README and design docs, listed in
+the guardrails allowlist (`waydroid` command), but was never implemented.
+
+**Files:**
+- `src/bazzite_mcp/tools/containers.py` — add `manage_waydroid` function
+- `src/bazzite_mcp/server.py` — register the tool
+- `tests/test_tools_containers.py` — add tests
+
+**Steps:**
+1. Add `manage_waydroid(action)` with actions: `setup`, `status`, `start`, `stop`
+2. `setup` should delegate to `ujust setup-waydroid`
+3. `start`/`stop` should use `waydroid session start/stop`
+4. `status` should use `waydroid status`
+5. Register in `server.py`
+
+**Verify:** `uv run pytest tests/test_tools_containers.py -v`
+
+---
+
+### 17. Complete structured logging
+
+**Problem:** Only `config.py`, `docs_cache.py`, and `gaming.py` have
+`logger = logging.getLogger(__name__)`. Other modules lack logging, making
+production debugging harder.
+
+**Files:** All files in `src/bazzite_mcp/` without a logger
+
+**Steps:**
+1. Add `logger = logging.getLogger(__name__)` to each module
+2. Log at appropriate levels (DEBUG for cache hits, INFO for refresh, WARNING for
+   fallbacks, ERROR for guardrail blocks)
+
+**Verify:** Manual — run the server and check log output.
+
+---
+
 ## P4: Future Enhancements (Lower Priority)
-
-### 12. Reranking with cross-encoder
-
-After hybrid search is in place, add optional cross-encoder reranking for the
-top N results. This would use a small model (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`)
-to score query-document pairs more accurately than embedding similarity.
-
-This requires adding a Python dependency (`sentence-transformers` or API call)
-and is only worth doing after hybrid search proves the fused result set is good.
 
 ### 13. Cache warming on server startup
 
