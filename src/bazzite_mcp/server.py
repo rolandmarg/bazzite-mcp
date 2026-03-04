@@ -18,6 +18,7 @@ from bazzite_mcp.tools.containers import (
     manage_quadlet,
     manage_waydroid,
 )
+from bazzite_mcp.tools.desktop import screenshot
 from bazzite_mcp.tools.docs import (
     bazzite_changelog,
     install_policy,
@@ -97,6 +98,7 @@ mcp.tool(set_display_config)
 mcp.tool(set_power_profile)
 mcp.tool(get_settings)
 mcp.tool(set_settings)
+mcp.tool(screenshot)
 
 # Services and networking
 mcp.tool(manage_service)
