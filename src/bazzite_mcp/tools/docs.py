@@ -66,7 +66,9 @@ def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
     return links
 
 
-async def _ensure_fresh_docs_cache(cache: DocsCache, ctx: Context | None = None) -> tuple[DocsCache, str]:
+async def _ensure_fresh_docs_cache(
+    cache: DocsCache, ctx: Context | None = None
+) -> tuple[DocsCache, str]:
     """Refresh docs on demand when cache is empty or stale."""
     reason = ""
     if cache.page_count() == 0:
@@ -91,6 +93,58 @@ async def _ensure_fresh_docs_cache(cache: DocsCache, ctx: Context | None = None)
     )
 
 
+def reciprocal_rank_fusion(
+    keyword_results: list[dict],
+    semantic_results: list[dict],
+    k: int = 60,
+    limit: int = 10,
+) -> list[dict]:
+    """Fuse keyword and semantic rankings with reciprocal rank fusion."""
+    fused_scores: dict[str, float] = {}
+    merged: dict[str, dict] = {}
+    keyword_urls: set[str] = set()
+    semantic_urls: set[str] = set()
+
+    for rank, result in enumerate(keyword_results):
+        url = str(result.get("url", ""))
+        if not url:
+            continue
+        keyword_urls.add(url)
+        fused_scores[url] = fused_scores.get(url, 0.0) + 1.0 / (k + rank + 1)
+        merged[url] = dict(result)
+
+    for rank, result in enumerate(semantic_results):
+        url = str(result.get("url", ""))
+        if not url:
+            continue
+        semantic_urls.add(url)
+        fused_scores[url] = fused_scores.get(url, 0.0) + 1.0 / (k + rank + 1)
+        if url not in merged:
+            merged[url] = dict(result)
+            continue
+
+        if len(str(result.get("content", ""))) > len(
+            str(merged[url].get("content", ""))
+        ):
+            merged[url]["content"] = result.get("content", "")
+        if "score" in result:
+            merged[url]["semantic_score"] = result["score"]
+
+    ranked_urls = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
+    fused: list[dict] = []
+    for url, score in ranked_urls[:limit]:
+        item = dict(merged[url])
+        item["fused_score"] = round(score, 6)
+        if url in keyword_urls and url in semantic_urls:
+            item["search_mode"] = "hybrid"
+        elif url in semantic_urls:
+            item["search_mode"] = "semantic"
+        else:
+            item["search_mode"] = "keyword"
+        fused.append(item)
+    return fused
+
+
 async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
     """Keyword search over cached Bazzite documentation (FTS5).
 
@@ -107,20 +161,34 @@ async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
             + refresh_note
         )
 
-    results = cache.search(query)
+    keyword_results = cache.search_scored(query, limit=20)
+    semantic_results = await semantic_search(cache._conn, query, limit=20)
+
+    if semantic_results:
+        results = reciprocal_rank_fusion(keyword_results, semantic_results, limit=10)
+    else:
+        results = keyword_results[:10]
+
     if not results:
         return f"No results for '{query}' in cached docs."
 
     parts: list[str] = []
     for result in results:
         snippet = result["content"][:500]
+        score_suffix = ""
+        if "fused_score" in result:
+            score_suffix = (
+                f" [{result.get('search_mode', 'hybrid')}: {result['fused_score']}]"
+            )
         parts.append(
-            f"### {result['title']} ({result['section']})\n{snippet}\nSource: {result['url']}"
+            f"### {result['title']} ({result['section']}){score_suffix}\n{snippet}\nSource: {result['url']}"
         )
     return "\n\n---\n\n".join(parts) + refresh_note
 
 
-async def semantic_search_docs(query: str, limit: int = 5, ctx: Context | None = None) -> str:
+async def semantic_search_docs(
+    query: str, limit: int = 5, ctx: Context | None = None
+) -> str:
     """Semantic similarity search over cached Bazzite docs using AI embeddings.
 
     Best for: natural language questions where exact keywords may not match
@@ -137,7 +205,7 @@ async def semantic_search_docs(query: str, limit: int = 5, ctx: Context | None =
             + refresh_note
         )
 
-    results = semantic_search(cache._conn, query, limit=limit)
+    results = await semantic_search(cache._conn, query, limit=limit)
     if not results:
         # Fall back to keyword search
         fallback = cache.search(query)

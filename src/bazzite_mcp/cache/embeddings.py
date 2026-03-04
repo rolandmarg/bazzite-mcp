@@ -8,6 +8,7 @@ blobs in SQLite for offline semantic search.
 from __future__ import annotations
 
 import os
+import re
 import struct
 from sqlite3 import Connection
 
@@ -30,18 +31,41 @@ def _get_api_key() -> str | None:
 def _current_model_id() -> str:
     """Return a string identifying the current embedding provider+model."""
     cfg = load_config()
-    return f"{cfg.embedding_provider}/{cfg.embedding_model}"
+    return f"{cfg.embedding_provider}/{cfg.embedding_model}/chunk-v2"
 
 
-def _chunk_text(text: str, chunk_size: int) -> list[str]:
-    """Split text into chunks at paragraph boundaries with overlap."""
+def _split_markdown_sections(text: str) -> list[str]:
+    """Split markdown content by section headers (##/###)."""
+    header_re = re.compile(r"(?m)^#{2,3}\s+.+$")
+    matches = list(header_re.finditer(text))
+    if not matches:
+        return [text]
+
+    sections: list[str] = []
+    first_start = matches[0].start()
+    if first_start > 0:
+        intro = text[:first_start].strip()
+        if intro:
+            sections.append(intro)
+
+    for idx, match in enumerate(matches):
+        start = match.start()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        section = text[start:end].strip()
+        if section:
+            sections.append(section)
+
+    return sections or [text]
+
+
+def _chunk_paragraphs(text: str, chunk_size: int) -> list[str]:
+    """Split text into paragraph-aware chunks with overlap."""
     paragraphs = text.split("\n\n")
     chunks: list[str] = []
     current = ""
     for para in paragraphs:
         if len(current) + len(para) + 2 > chunk_size and current:
             chunks.append(current.strip())
-            # Keep overlap from the end of previous chunk
             if CHUNK_OVERLAP > 0 and len(current) > CHUNK_OVERLAP:
                 current = current[-CHUNK_OVERLAP:] + "\n\n" + para
             else:
@@ -50,7 +74,32 @@ def _chunk_text(text: str, chunk_size: int) -> list[str]:
             current = current + "\n\n" + para if current else para
     if current.strip():
         chunks.append(current.strip())
-    return chunks or [text[:chunk_size]]
+    return chunks
+
+
+def _chunk_text(
+    text: str,
+    chunk_size: int,
+    title: str = "",
+    section: str = "",
+) -> list[str]:
+    """Split text into header-aware chunks and prefix with page context."""
+    prefix = ""
+    if title or section:
+        prefix = f"[{title or 'Untitled'} > {section or 'General'}] "
+
+    effective_size = max(1, chunk_size - len(prefix))
+    sections = _split_markdown_sections(text)
+    chunks: list[str] = []
+    for markdown_section in sections:
+        for chunk in _chunk_paragraphs(markdown_section, effective_size):
+            chunks.append(prefix + chunk if prefix else chunk)
+
+    if chunks:
+        return chunks
+
+    fallback = text[:effective_size]
+    return [prefix + fallback if prefix else fallback]
 
 
 def _encode_vector(vec: list[float]) -> bytes:
@@ -82,12 +131,14 @@ async def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | N
     # Use batchEmbedContents for efficiency
     requests = []
     for text in texts:
-        requests.append({
-            "model": f"models/{model}",
-            "content": {"parts": [{"text": text}]},
-            "outputDimensionality": cfg.embedding_dimensions,
-            "taskType": "RETRIEVAL_DOCUMENT",
-        })
+        requests.append(
+            {
+                "model": f"models/{model}",
+                "content": {"parts": [{"text": text}]},
+                "outputDimensionality": cfg.embedding_dimensions,
+                "taskType": "RETRIEVAL_DOCUMENT",
+            }
+        )
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -103,7 +154,9 @@ async def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | N
         return None
 
 
-async def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float]] | None:
+async def _embed_gemini_query(
+    texts: list[str], api_key: str
+) -> list[list[float]] | None:
     """Generate query embeddings via Gemini (uses RETRIEVAL_QUERY task type)."""
     cfg = load_config()
     model = cfg.embedding_model
@@ -111,12 +164,14 @@ async def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float
 
     requests = []
     for text in texts:
-        requests.append({
-            "model": f"models/{model}",
-            "content": {"parts": [{"text": text}]},
-            "outputDimensionality": cfg.embedding_dimensions,
-            "taskType": "RETRIEVAL_QUERY",
-        })
+        requests.append(
+            {
+                "model": f"models/{model}",
+                "content": {"parts": [{"text": text}]},
+                "outputDimensionality": cfg.embedding_dimensions,
+                "taskType": "RETRIEVAL_QUERY",
+            }
+        )
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -154,7 +209,9 @@ async def _embed_openai(texts: list[str], api_key: str) -> list[list[float]] | N
         return None
 
 
-async def generate_embeddings(texts: list[str], query: bool = False) -> list[list[float]] | None:
+async def generate_embeddings(
+    texts: list[str], query: bool = False
+) -> list[list[float]] | None:
     """Call the configured embedding API. Returns None if unavailable.
 
     Args:
@@ -182,22 +239,26 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     cfg = load_config()
     api_key = _get_api_key()
     if not api_key:
-        return 0, [f"No API key found in ${cfg.embedding_api_key_env}. Set it to enable semantic search."]
+        return 0, [
+            f"No API key found in ${cfg.embedding_api_key_env}. Set it to enable semantic search."
+        ]
 
     model_id = _current_model_id()
 
     # Invalidate embeddings from a different model
     stale = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM embeddings WHERE model != ? AND model != ''",
+        "SELECT COUNT(*) AS cnt FROM embeddings WHERE COALESCE(model, '') != ?",
         (model_id,),
     ).fetchone()
     if stale and stale["cnt"] > 0:
-        conn.execute("DELETE FROM embeddings WHERE model != ?", (model_id,))
+        conn.execute(
+            "DELETE FROM embeddings WHERE COALESCE(model, '') != ?", (model_id,)
+        )
         conn.commit()
 
     # Find pages without embeddings
     rows = conn.execute(
-        "SELECT p.id, p.title, p.content FROM pages p "
+        "SELECT p.id, p.title, p.section, p.content FROM pages p "
         "LEFT JOIN embeddings e ON p.id = e.page_id "
         "WHERE e.id IS NULL"
     ).fetchall()
@@ -217,9 +278,14 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
         for row in batch:
             page_id = row["id"]
             title = row["title"] or ""
+            section = row["section"] or ""
             content = row["content"] or ""
-            full_text = f"{title}\n\n{content}"
-            chunks = _chunk_text(full_text, cfg.embedding_chunk_size)
+            chunks = _chunk_text(
+                content,
+                cfg.embedding_chunk_size,
+                title=title,
+                section=section,
+            )
             for idx, chunk in enumerate(chunks):
                 all_chunks.append((page_id, idx, chunk))
 
@@ -227,14 +293,23 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
         vectors = await generate_embeddings(texts)
 
         if vectors is None:
-            errors.append(f"Embedding API call failed for batch starting at page {batch[0]['id']}")
+            errors.append(
+                f"Embedding API call failed for batch starting at page {batch[0]['id']}"
+            )
             continue
 
         for (page_id, chunk_idx, chunk_text), vec in zip(all_chunks, vectors):
             conn.execute(
                 "INSERT OR REPLACE INTO embeddings (page_id, chunk_index, chunk_text, embedding, dimensions, model) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (page_id, chunk_idx, chunk_text, _encode_vector(vec), len(vec), model_id),
+                (
+                    page_id,
+                    chunk_idx,
+                    chunk_text,
+                    _encode_vector(vec),
+                    len(vec),
+                    model_id,
+                ),
             )
             embedded += 1
 
@@ -243,22 +318,19 @@ async def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     return embedded, errors
 
 
-def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
+async def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
     """Search cached docs by semantic similarity.
 
     Embeds the query via API, then ranks stored chunks by cosine similarity.
     Filters out results below MIN_SIMILARITY_THRESHOLD.
 
-    Note: This remains synchronous because it's called from tools that need
-    immediate results and the query embedding is a single fast API call.
-    For the query path, we use synchronous httpx to avoid requiring await.
     """
     api_key = _get_api_key()
     if not api_key:
         return []
 
     cfg = load_config()
-    query_vec = _sync_embed_query(query, api_key, cfg)
+    query_vec = await _embed_query(query, api_key, cfg)
     if query_vec is None:
         return []
 
@@ -276,54 +348,66 @@ def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
         sim = _cosine_similarity(query_vec, stored_vec)
         if sim < MIN_SIMILARITY_THRESHOLD:
             continue
-        scored.append((sim, {
-            "title": row["title"],
-            "section": row["section"],
-            "url": row["url"],
-            "content": row["chunk_text"],
-            "score": round(sim, 4),
-        }))
+        scored.append(
+            (
+                sim,
+                {
+                    "title": row["title"],
+                    "section": row["section"],
+                    "url": row["url"],
+                    "content": row["chunk_text"],
+                    "score": round(sim, 4),
+                },
+            )
+        )
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:limit]]
 
 
-def _sync_embed_query(query: str, api_key: str, cfg) -> list[float] | None:
-    """Synchronous single-query embedding for search-time use."""
+async def _embed_query(query: str, api_key: str, cfg) -> list[float] | None:
+    """Asynchronous single-query embedding for search-time use."""
     if cfg.embedding_provider == "gemini":
         model = cfg.embedding_model
         base_url = "https://generativelanguage.googleapis.com/v1beta"
         try:
-            response = httpx.post(
-                f"{base_url}/models/{model}:batchEmbedContents",
-                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-                json={"requests": [{
-                    "model": f"models/{model}",
-                    "content": {"parts": [{"text": query}]},
-                    "outputDimensionality": cfg.embedding_dimensions,
-                    "taskType": "RETRIEVAL_QUERY",
-                }]},
-                timeout=60,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["embeddings"][0]["values"]
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"{base_url}/models/{model}:batchEmbedContents",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": api_key,
+                    },
+                    json={
+                        "requests": [
+                            {
+                                "model": f"models/{model}",
+                                "content": {"parts": [{"text": query}]},
+                                "outputDimensionality": cfg.embedding_dimensions,
+                                "taskType": "RETRIEVAL_QUERY",
+                            }
+                        ]
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["embeddings"][0]["values"]
         except Exception:
             return None
     else:
         try:
-            response = httpx.post(
-                "https://api.openai.com/v1/embeddings",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "input": [query],
-                    "model": cfg.embedding_model,
-                    "dimensions": cfg.embedding_dimensions,
-                },
-                timeout=60,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["data"][0]["embedding"]
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/embeddings",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "input": [query],
+                        "model": cfg.embedding_model,
+                        "dimensions": cfg.embedding_dimensions,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["data"][0]["embedding"]
         except Exception:
             return None

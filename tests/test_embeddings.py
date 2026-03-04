@@ -43,3 +43,21 @@ def test_chunk_text_single_chunk():
     chunks = _chunk_text(text, chunk_size=2000)
     assert len(chunks) == 1
     assert chunks[0] == "Short text."
+
+
+def test_chunk_text_splits_on_markdown_headers():
+    text = "## One\n\n" + ("a " * 80) + "\n\n## Two\n\n" + ("b " * 80)
+    chunks = _chunk_text(text, chunk_size=120)
+    assert len(chunks) >= 2
+    assert any("## One" in chunk for chunk in chunks)
+    assert any("## Two" in chunk for chunk in chunks)
+
+
+def test_chunk_text_prefixes_context_when_provided():
+    chunks = _chunk_text(
+        "Content paragraph.",
+        chunk_size=200,
+        title="Install Guide",
+        section="General",
+    )
+    assert chunks[0].startswith("[Install Guide > General] ")
