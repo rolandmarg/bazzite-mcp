@@ -5,9 +5,11 @@ from bazzite_mcp.runner import run_audited, run_command
 
 def ujust_list(filter: str | None = None) -> str:
     """List available ujust commands, optionally filtered by keyword."""
-    result = run_command("ujust --summary 2>/dev/null || ujust 2>&1")
+    result = run_command("ujust --summary")
     if result.returncode != 0:
-        return f"Error listing ujust commands: {result.stderr}"
+        result = run_command("ujust")
+        if result.returncode != 0:
+            return f"Error listing ujust commands: {result.stderr}"
 
     lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
     if filter:
@@ -33,6 +35,31 @@ def ujust_run(command: str) -> str:
         parts = shlex.split(command)
     except ValueError:
         return "Invalid command syntax."
+
+    if not parts:
+        return "Missing ujust command."
+
+    recipe = parts[0]
+    if len(parts) >= 2 and parts[1] in {"help", "--help", "-h"}:
+        usage = run_command(f"ujust --usage {shlex.quote(recipe)}")
+        if usage.returncode == 0 and usage.stdout.strip():
+            return usage.stdout
+        fallback = run_command(f"ujust --show {shlex.quote(recipe)}")
+        if fallback.returncode == 0 and fallback.stdout.strip():
+            return fallback.stdout
+        return f"Could not retrieve usage for '{recipe}'."
+
+    recipe_source = run_command(f"ujust --show {shlex.quote(recipe)}")
+    if (
+        recipe_source.returncode == 0
+        and len(parts) == 1
+        and "Choose" in recipe_source.stdout
+    ):
+        return (
+            f"'{recipe}' appears interactive. Pass an explicit non-interactive option "
+            "(for example: '<recipe> help') or inspect it with ujust_show first."
+        )
+
     result = run_audited(
         f"ujust {shlex.join(parts)}",
         tool="ujust_run",

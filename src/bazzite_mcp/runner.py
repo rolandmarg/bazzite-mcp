@@ -26,6 +26,8 @@ def run_command(command: str, timeout: int = 120) -> CommandResult:
         capture_output=True,
         text=True,
         timeout=timeout,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
     )
     stdout = result.stdout.strip()
     # Surface guardrail warnings directly in output so they always reach the user
@@ -65,11 +67,15 @@ def run_audited(
             tool=tool,
             command=command,
             args=json.dumps(args) if args else None,
-            result="success" if result.returncode == 0 else f"failed (exit {result.returncode})",
+            result="success"
+            if result.returncode == 0
+            else f"failed (exit {result.returncode})",
             output=(result.stdout[:500] if result.stdout else None),
             rollback=rollback,
         )
     except Exception as exc:
-        logger.error("Audit logging failed for tool=%s command=%s: %s", tool, command, exc)
+        logger.error(
+            "Audit logging failed for tool=%s command=%s: %s", tool, command, exc
+        )
         result.warning = (result.warning or "") + f" [AUDIT FAILED: {exc}]"
     return result
