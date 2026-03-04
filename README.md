@@ -16,12 +16,15 @@ Works with any MCP-compatible client: [Claude Code](https://claude.com/claude-co
 - **Bazzite docs** — offline-capable full-text search of docs.bazzite.gg with FTS5
 - **Changelog tracking** — query what changed between Bazzite releases
 - **Audit log** — every mutation is logged with timestamp, command, and rollback command
-- **Guardrails** — blocks destructive operations (rm -rf /, rpm-ostree reset, DE rebasing)
+- **Guardrails** — command allowlist + blocklist defense-in-depth (blocks destructive ops, injection vectors, exfiltration)
+- **MCP Prompts** — reusable workflow templates for troubleshooting, installing apps, setting up dev environments
+- **Semantic search** — AI-powered meaning-based doc search with Gemini/OpenAI embeddings (free tier)
 - **Self-improving** — agents can file GitHub issues and PRs to improve the server itself
+- **Graceful lifecycle** — signal handlers, resource cleanup, and clean uninstall utility
 
 ## Install
 
-Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/rolandmarg/bazzite-mcp.git
@@ -157,8 +160,20 @@ Resources provide read-only context that agents can query without calling tools:
 |-----|-------------|
 | `bazzite://system/overview` | Current OS, kernel, desktop, hardware |
 | `bazzite://install/hierarchy` | Full 6-tier install hierarchy with explanations |
+| `bazzite://install/policy` | Quick-reference install policy |
 | `bazzite://docs/index` | Index of all cached documentation pages |
-| `bazzite://server/info` | Server config and cache status |
+| `bazzite://server/info` | Server config, cache status, and version |
+
+## MCP Prompts
+
+Prompts are reusable workflow templates that agents can invoke:
+
+| Prompt | Description |
+|--------|-------------|
+| `troubleshoot_system` | Gather diagnostics for a system issue |
+| `install_app` | Walk through the 6-tier hierarchy to install an app |
+| `setup_dev_environment` | Set up a dev environment using distrobox |
+| `diagnose_service` | Debug a failing systemd service |
 
 ## On-Demand Refresh (Default)
 
@@ -239,6 +254,28 @@ Environment variable overrides:
 | `BAZZITE_MCP_CACHE_TTL` | `7` | Cache TTL in days (legacy fallback) |
 | `BAZZITE_MCP_CRAWL_MAX` | `100` | Max pages to crawl |
 | `BAZZITE_MCP_ENV_FILE` | `~/.config/bazzite-mcp/env` | Path to env file loaded at startup |
+
+## Uninstall
+
+Remove all data (docs cache, audit log, embeddings):
+
+```bash
+uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup
+```
+
+Also remove config files:
+
+```bash
+uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup --include-config
+```
+
+Preview what would be removed:
+
+```bash
+uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.cleanup --dry-run
+```
+
+Then remove the repo itself and the MCP client config entry.
 
 ## Development
 
