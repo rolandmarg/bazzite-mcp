@@ -1,5 +1,6 @@
-from unittest.mock import MagicMock, patch, call
-import os
+from unittest.mock import MagicMock, patch
+
+from fastmcp.utilities.types import Image
 
 from bazzite_mcp.runner import CommandResult
 from bazzite_mcp.tools.desktop import screenshot
@@ -7,12 +8,14 @@ from bazzite_mcp.tools.desktop import screenshot
 
 @patch("bazzite_mcp.tools.desktop.shutil.which")
 @patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_returns_jpeg_path(mock_run: MagicMock, mock_which: MagicMock) -> None:
-    mock_which.return_value = "/usr/bin/spectacle"  # spectacle found
+def test_screenshot_returns_image_with_jpeg(mock_run: MagicMock, mock_which: MagicMock) -> None:
+    mock_which.return_value = "/usr/bin/spectacle"
     mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
     result = screenshot()
-    assert result.endswith(".jpg")
-    assert "/tmp/bazzite-mcp/" in result
+    assert isinstance(result, Image)
+    assert result.path is not None
+    assert str(result.path).endswith(".jpg")
+    assert "/tmp/bazzite-mcp/" in str(result.path)
 
 
 @patch("bazzite_mcp.tools.desktop.shutil.which")
@@ -44,4 +47,5 @@ def test_screenshot_falls_back_to_png_without_magick(mock_run: MagicMock, mock_w
     mock_which.side_effect = which_side_effect
     mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
     result = screenshot()
-    assert result.endswith(".png")
+    assert isinstance(result, Image)
+    assert str(result.path).endswith(".png")

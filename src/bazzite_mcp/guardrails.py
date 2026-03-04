@@ -29,6 +29,7 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "firewall-cmd",
         "flatpak",
         "free",
+        "gdbus",
         "gh",
         "git",
         "gnome-randr",
@@ -50,6 +51,7 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "powerprofilesctl",
         "ps",
         "python3",
+        "qdbus",
         "rpm-ostree",
         "sensors",
         "spectacle",
@@ -63,6 +65,7 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "vulkaninfo",
         "waydroid",
         "xrandr",
+        "ydotool",
     }
 )
 

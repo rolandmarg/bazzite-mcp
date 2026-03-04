@@ -18,7 +18,18 @@ from bazzite_mcp.tools.containers import (
     manage_quadlet,
     manage_waydroid,
 )
-from bazzite_mcp.tools.desktop import screenshot
+from bazzite_mcp.tools.desktop import (
+    activate_window,
+    inspect_window,
+    interact,
+    list_windows,
+    screenshot,
+    screenshot_window,
+    send_key,
+    send_keys,
+    send_mouse,
+    set_text,
+)
 from bazzite_mcp.tools.docs import (
     bazzite_changelog,
     install_policy,
@@ -99,6 +110,15 @@ mcp.tool(set_power_profile)
 mcp.tool(get_settings)
 mcp.tool(set_settings)
 mcp.tool(screenshot)
+mcp.tool(screenshot_window)
+mcp.tool(list_windows)
+mcp.tool(activate_window)
+mcp.tool(inspect_window)
+mcp.tool(interact)
+mcp.tool(set_text)
+mcp.tool(send_keys)
+mcp.tool(send_key)
+mcp.tool(send_mouse)
 
 # Services and networking
 mcp.tool(manage_service)
