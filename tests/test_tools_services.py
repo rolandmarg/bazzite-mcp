@@ -3,12 +3,19 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from bazzite_mcp.runner import CommandResult, ToolError
-from bazzite_mcp.tools.services import manage_firewall, manage_service, network_status, service_status
+from bazzite_mcp.tools.services import (
+    manage_firewall,
+    manage_service,
+    network_status,
+    service_status,
+)
 
 
 @patch("bazzite_mcp.tools.services.run_command")
 def test_service_status(mock_run: MagicMock) -> None:
-    mock_run.return_value = MagicMock(returncode=0, stdout="active (running)", stderr="")
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="active (running)", stderr=""
+    )
     result = service_status("NetworkManager")
     assert "active" in result
 
@@ -62,7 +69,7 @@ def test_manage_service_disable(mock_audited: MagicMock) -> None:
 
 def test_manage_service_invalid_action() -> None:
     with pytest.raises(ToolError, match="Unknown action"):
-        manage_service("bluetooth.service", "destroy")
+        manage_service("bluetooth.service", "destroy")  # pyright: ignore[reportArgumentType]
 
 
 @patch("bazzite_mcp.tools.services.run_audited")
@@ -82,11 +89,13 @@ def test_manage_firewall_add_port(mock_audited: MagicMock) -> None:
     mock_audited.return_value = CommandResult(returncode=0, stdout="success", stderr="")
     result = manage_firewall("add-port", port="8080/tcp")
     assert "success" in result
+    assert mock_audited.call_count == 2
     # Verify the command includes the port
-    args, kwargs = mock_audited.call_args
+    args, kwargs = mock_audited.call_args_list[0]
     assert "add-port=8080/tcp" in args[0]
     # Verify rollback is remove-port
     assert "remove-port=8080/tcp" in kwargs["rollback"]
+    assert mock_audited.call_args_list[1].args[0] == "pkexec firewall-cmd --reload"
 
 
 @patch("bazzite_mcp.tools.services.run_audited")
@@ -94,7 +103,8 @@ def test_manage_firewall_remove_port(mock_audited: MagicMock) -> None:
     mock_audited.return_value = CommandResult(returncode=0, stdout="success", stderr="")
     result = manage_firewall("remove-port", port="8080/tcp")
     assert "success" in result
-    args, kwargs = mock_audited.call_args
+    assert mock_audited.call_count == 2
+    args, kwargs = mock_audited.call_args_list[0]
     assert "remove-port=8080/tcp" in args[0]
     # Rollback for remove-port is add-port
     assert "add-port=8080/tcp" in kwargs["rollback"]
@@ -106,9 +116,9 @@ def test_manage_firewall_rollback_inverse_mapping(mock_audited: MagicMock) -> No
     mock_audited.return_value = CommandResult(returncode=0, stdout="success", stderr="")
 
     manage_firewall("add-service", service="http")
-    _, kwargs = mock_audited.call_args
+    _, kwargs = mock_audited.call_args_list[0]
     assert "remove-service=http" in kwargs["rollback"]
 
     manage_firewall("remove-service", service="http")
-    _, kwargs = mock_audited.call_args
+    _, kwargs = mock_audited.call_args_list[2]
     assert "add-service=http" in kwargs["rollback"]

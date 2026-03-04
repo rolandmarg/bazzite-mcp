@@ -73,11 +73,14 @@ def contribute_fix(branch_name: str, description: str, files_changed: str) -> st
         return f"Failed to create branch: {create_branch.stderr}"
 
     safe_files = " ".join(shlex.quote(f) for f in shlex.split(files_changed))
-    commit_cmd = (
-        f"git -C {repo} add {safe_files} && "
+    add_result = run_command(f"git -C {repo} add {safe_files}")
+    if add_result.returncode != 0:
+        run_command(f"git -C {repo} checkout main")
+        return f"Failed to stage files: {add_result.stderr}"
+
+    commit = run_command(
         f"git -C {repo} commit -m {shlex.quote(f'feat: {description[:72]}')}"
     )
-    commit = run_command(commit_cmd)
     if commit.returncode != 0:
         run_command(f"git -C {repo} checkout main")
         return f"Failed to commit: {commit.stderr}"
@@ -120,7 +123,9 @@ def list_improvements(state: str = "open") -> str:
 
 def list_pending_prs() -> str:
     """List open pull requests for the repository."""
-    result = run_command(f"gh pr list --repo {shlex.quote(_repo_slug())} --state open --limit 20")
+    result = run_command(
+        f"gh pr list --repo {shlex.quote(_repo_slug())} --state open --limit 20"
+    )
     if result.returncode != 0:
         return f"Failed to list PRs: {result.stderr}"
     return result.stdout if result.stdout.strip() else "No open PRs."

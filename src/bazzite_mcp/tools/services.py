@@ -8,19 +8,37 @@ from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 def manage_service(
     name: str,
-    action: Literal["start", "stop", "restart", "enable", "disable", "enable --now", "disable --now"],
+    action: Literal[
+        "start", "stop", "restart", "enable", "disable", "enable --now", "disable --now"
+    ],
     user: bool = False,
 ) -> str:
     """Start, stop, restart, enable, or disable a systemd service."""
-    valid_actions = ("start", "stop", "restart", "enable", "disable", "enable --now", "disable --now")
+    valid_actions = (
+        "start",
+        "stop",
+        "restart",
+        "enable",
+        "disable",
+        "enable --now",
+        "disable --now",
+    )
     if action not in valid_actions:
-        raise ToolError(f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}.")
+        raise ToolError(
+            f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}."
+        )
 
     scope = "--user" if user else ""
     sname = shlex.quote(name)
     # Determine rollback action
-    reverse = {"start": "stop", "stop": "start", "enable": "disable", "disable": "enable",
-                "enable --now": "disable --now", "disable --now": "enable --now"}.get(action)
+    reverse = {
+        "start": "stop",
+        "stop": "start",
+        "enable": "disable",
+        "disable": "enable",
+        "enable --now": "disable --now",
+        "disable --now": "enable --now",
+    }.get(action)
     rollback_cmd = f"systemctl {scope} {reverse} {sname}" if reverse else None
     result = run_audited(
         f"systemctl {scope} {action} {sname}",
@@ -107,7 +125,9 @@ def manage_connection(
             args={"action": action, "name": name, "properties": properties},
         )
     else:
-        raise ToolError("Usage: action='show|up|down|delete|modify', name=<connection>, properties=<nmcli args for modify>")
+        raise ToolError(
+            "Usage: action='show|up|down|delete|modify', name=<connection>, properties=<nmcli args for modify>"
+        )
 
     if result.returncode != 0:
         raise ToolError(f"Error: {result.stderr}")
@@ -126,44 +146,55 @@ def manage_firewall(
     """
     if action == "list":
         result = run_command("firewall-cmd --list-all")
-    elif action == "add-port" and port:
+        if result.returncode != 0:
+            raise ToolError(f"Error: {result.stderr}")
+        return result.stdout
+
+    primary_cmd = ""
+    rollback_cmd = ""
+    if action == "add-port" and port:
         sport = shlex.quote(port)
-        result = run_audited(
-            f"pkexec firewall-cmd --add-port={sport} --permanent && pkexec firewall-cmd --reload",
-            tool="manage_firewall",
-            args={"action": action, "port": port},
-            rollback=f"pkexec firewall-cmd --remove-port={sport} --permanent && pkexec firewall-cmd --reload",
-        )
+        primary_cmd = f"pkexec firewall-cmd --add-port={sport} --permanent"
+        rollback_cmd = f"pkexec firewall-cmd --remove-port={sport} --permanent"
     elif action == "remove-port" and port:
         sport = shlex.quote(port)
-        result = run_audited(
-            f"pkexec firewall-cmd --remove-port={sport} --permanent && pkexec firewall-cmd --reload",
-            tool="manage_firewall",
-            args={"action": action, "port": port},
-            rollback=f"pkexec firewall-cmd --add-port={sport} --permanent && pkexec firewall-cmd --reload",
-        )
+        primary_cmd = f"pkexec firewall-cmd --remove-port={sport} --permanent"
+        rollback_cmd = f"pkexec firewall-cmd --add-port={sport} --permanent"
     elif action == "add-service" and service:
         ssvc = shlex.quote(service)
-        result = run_audited(
-            f"pkexec firewall-cmd --add-service={ssvc} --permanent && pkexec firewall-cmd --reload",
-            tool="manage_firewall",
-            args={"action": action, "service": service},
-            rollback=f"pkexec firewall-cmd --remove-service={ssvc} --permanent && pkexec firewall-cmd --reload",
-        )
+        primary_cmd = f"pkexec firewall-cmd --add-service={ssvc} --permanent"
+        rollback_cmd = f"pkexec firewall-cmd --remove-service={ssvc} --permanent"
     elif action == "remove-service" and service:
         ssvc = shlex.quote(service)
-        result = run_audited(
-            f"pkexec firewall-cmd --remove-service={ssvc} --permanent && pkexec firewall-cmd --reload",
-            tool="manage_firewall",
-            args={"action": action, "service": service},
-            rollback=f"pkexec firewall-cmd --add-service={ssvc} --permanent && pkexec firewall-cmd --reload",
-        )
+        primary_cmd = f"pkexec firewall-cmd --remove-service={ssvc} --permanent"
+        rollback_cmd = f"pkexec firewall-cmd --add-service={ssvc} --permanent"
     else:
-        raise ToolError("Usage: action='list|add-port|remove-port|add-service|remove-service'")
+        raise ToolError(
+            "Usage: action='list|add-port|remove-port|add-service|remove-service'"
+        )
 
-    if result.returncode != 0:
-        raise ToolError(f"Error: {result.stderr}")
-    return result.stdout
+    change_result = run_audited(
+        primary_cmd,
+        tool="manage_firewall",
+        args={"action": action, "port": port, "service": service},
+        rollback=rollback_cmd,
+    )
+    if change_result.returncode != 0:
+        raise ToolError(f"Error: {change_result.stderr}")
+
+    reload_result = run_audited(
+        "pkexec firewall-cmd --reload",
+        tool="manage_firewall",
+        args={"action": "reload", "triggered_by": action},
+    )
+    if reload_result.returncode != 0:
+        raise ToolError(f"Firewall updated but reload failed: {reload_result.stderr}")
+
+    out = change_result.stdout.strip()
+    reload_out = reload_result.stdout.strip()
+    if out and reload_out:
+        return f"{out}\n{reload_out}"
+    return out or reload_out or "Firewall updated and reloaded."
 
 
 def manage_tailscale(action: Literal["status", "up", "down", "ip", "peers"]) -> str:

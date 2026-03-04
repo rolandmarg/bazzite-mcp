@@ -46,10 +46,15 @@ def set_audio_output(device: str | None = None) -> str:
 
 def get_display_config() -> str:
     """Query current display setup."""
-    result = run_command(
-        "gnome-randr 2>/dev/null || xrandr --query 2>/dev/null || echo 'No display tool available'"
-    )
-    return result.stdout
+    result = run_command("gnome-randr")
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout
+
+    fallback = run_command("xrandr --query")
+    if fallback.returncode == 0 and fallback.stdout.strip():
+        return fallback.stdout
+
+    return "No display tool available"
 
 
 def set_display_config(
@@ -90,7 +95,12 @@ def set_display_config(
             result = run_audited(
                 fallback,
                 tool="set_display_config",
-                args={"output": output, "resolution": resolution, "refresh": refresh, "via": "xrandr"},
+                args={
+                    "output": output,
+                    "resolution": resolution,
+                    "refresh": refresh,
+                    "via": "xrandr",
+                },
             )
             if result.returncode != 0:
                 raise ToolError(f"Failed to set display config: {result.stderr}")
@@ -101,7 +111,9 @@ def set_display_config(
     )
 
 
-def set_power_profile(profile: Literal["performance", "balanced", "power-saver"]) -> str:
+def set_power_profile(
+    profile: Literal["performance", "balanced", "power-saver"],
+) -> str:
     """Switch power profile between performance, balanced, or power-saver."""
 
     result = run_audited(

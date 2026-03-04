@@ -72,13 +72,16 @@ def hardware_info() -> str:
         ("GPU", "lspci -v | grep -A 10 -i 'vga\\|3d'"),
         ("Memory", "free -h"),
         ("Block Devices", "lsblk -o NAME,SIZE,TYPE,MOUNTPOINT"),
-        ("Sensors", "sensors 2>/dev/null || echo 'sensors not available'"),
+        ("Sensors", "sensors"),
     ]
 
     parts: list[str] = []
     for label, cmd in commands:
         result = run_command(cmd)
-        parts.append(f"=== {label} ===\n{result.stdout}")
+        output = result.stdout
+        if label == "Sensors" and result.returncode != 0:
+            output = "sensors not available"
+        parts.append(f"=== {label} ===\n{output}")
     return "\n\n".join(parts)
 
 

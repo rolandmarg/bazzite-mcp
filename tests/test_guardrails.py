@@ -123,3 +123,13 @@ def test_blocks_stdout_redirect_to_dev() -> None:
 def test_allows_stderr_redirect_for_cat() -> None:
     result = check_command("cat 2>/dev/null")
     assert result.allowed is True
+
+
+def test_blocks_shell_metacharacter_chaining() -> None:
+    with pytest.raises(GuardrailError, match="shell metacharacters"):
+        check_command("echo hi && true")
+
+
+def test_blocks_command_substitution_pattern() -> None:
+    with pytest.raises(GuardrailError, match="command substitution"):
+        check_command("echo $(uname -a)")
