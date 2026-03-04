@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import shlex
+from typing import Literal
 
 from bazzite_mcp.runner import run_command
 
@@ -73,8 +76,9 @@ def hardware_info() -> str:
     return "\n\n".join(parts)
 
 
-def process_list(sort_by: str = "cpu", count: int = 15) -> str:
-    """Show top processes sorted by cpu or memory."""
+def process_list(sort_by: Literal["cpu", "mem"] = "cpu", count: int = 15) -> str:
+    """Show top processes sorted by cpu or memory usage."""
     sort_flag = "-%cpu" if sort_by == "cpu" else "-%mem"
-    result = run_command(f"ps aux --sort={sort_flag} | head -n {count + 1}")
+    safe_count = max(1, min(count, 100))
+    result = run_command(f"ps aux --sort={sort_flag} | head -n {safe_count + 1}")
     return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"

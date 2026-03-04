@@ -1,19 +1,18 @@
+from __future__ import annotations
+
 import shlex
+from typing import Literal
 
 from bazzite_mcp.runner import run_audited, run_command
 
 
-def manage_service(name: str, action: str, user: bool = False) -> str:
+def manage_service(
+    name: str,
+    action: Literal["start", "stop", "restart", "enable", "disable", "enable --now", "disable --now"],
+    user: bool = False,
+) -> str:
     """Start, stop, restart, enable, or disable a systemd service."""
-    valid_actions = [
-        "start",
-        "stop",
-        "restart",
-        "enable",
-        "disable",
-        "enable --now",
-        "disable --now",
-    ]
+    valid_actions = ("start", "stop", "restart", "enable", "disable", "enable --now", "disable --now")
     if action not in valid_actions:
         return f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}."
 
@@ -41,16 +40,19 @@ def service_status(name: str, user: bool = False) -> str:
     return result.stdout if result.stdout else result.stderr
 
 
-def list_services(state: str | None = None, user: bool = False) -> str:
+def list_services(
+    state: Literal["running", "failed", "enabled", "disabled"] | None = None,
+    user: bool = False,
+) -> str:
     """List systemd services, optionally filtered by state."""
     scope = "--user" if user else ""
     if state in ("running", "failed"):
         result = run_command(
-            f"systemctl {scope} list-units --type=service --state={state} --no-pager"
+            f"systemctl {scope} list-units --type=service --state={shlex.quote(state)} --no-pager"
         )
     elif state in ("enabled", "disabled"):
         result = run_command(
-            f"systemctl {scope} list-unit-files --type=service --state={state} --no-pager"
+            f"systemctl {scope} list-unit-files --type=service --state={shlex.quote(state)} --no-pager"
         )
     else:
         result = run_command(f"systemctl {scope} list-units --type=service --no-pager")
@@ -74,11 +76,16 @@ def network_status() -> str:
 
 
 def manage_connection(
-    action: str,
+    action: Literal["show", "up", "down", "delete", "modify"],
     name: str | None = None,
     properties: str | None = None,
 ) -> str:
-    """Create, modify, or delete NetworkManager connections."""
+    """Create, modify, or delete NetworkManager connections.
+
+    Use 'show' to list all connections, 'up'/'down' to activate/deactivate.
+    For 'modify', provide properties as space-separated key=value pairs
+    (e.g. 'ipv4.dns 8.8.8.8').
+    """
     if action == "show":
         result = run_command("nmcli connection show")
     elif action in ("up", "down", "delete") and name:
@@ -88,10 +95,14 @@ def manage_connection(
             args={"action": action, "name": name},
         )
     elif action == "modify" and name and properties:
-        # Note: properties is multi-token by design (nmcli key=value pairs).
-        # Guardrails check the full command for dangerous patterns.
+        # Sanitize properties: split and re-quote each token
+        try:
+            prop_parts = shlex.split(properties)
+        except ValueError:
+            return "Invalid properties syntax."
+        safe_props = " ".join(shlex.quote(p) for p in prop_parts)
         result = run_audited(
-            f"nmcli connection modify {shlex.quote(name)} {properties}",
+            f"nmcli connection modify {shlex.quote(name)} {safe_props}",
             tool="manage_connection",
             args={"action": action, "name": name, "properties": properties},
         )
@@ -102,44 +113,48 @@ def manage_connection(
 
 
 def manage_firewall(
-    action: str,
+    action: Literal["list", "add-port", "remove-port", "add-service", "remove-service"],
     port: str | None = None,
     service: str | None = None,
 ) -> str:
-    """Manage firewalld rules."""
+    """Manage firewalld rules.
+
+    Use 'list' to see current rules. Use 'add-port'/'remove-port' with a port
+    string like '8080/tcp'. Use 'add-service'/'remove-service' with a service name.
+    """
     if action == "list":
         result = run_command("firewall-cmd --list-all")
     elif action == "add-port" and port:
         sport = shlex.quote(port)
         result = run_audited(
-            f"sudo firewall-cmd --add-port={sport} --permanent && sudo firewall-cmd --reload",
+            f"pkexec firewall-cmd --add-port={sport} --permanent && pkexec firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "port": port},
-            rollback=f"sudo firewall-cmd --remove-port={sport} --permanent && sudo firewall-cmd --reload",
+            rollback=f"pkexec firewall-cmd --remove-port={sport} --permanent && pkexec firewall-cmd --reload",
         )
     elif action == "remove-port" and port:
         sport = shlex.quote(port)
         result = run_audited(
-            f"sudo firewall-cmd --remove-port={sport} --permanent && sudo firewall-cmd --reload",
+            f"pkexec firewall-cmd --remove-port={sport} --permanent && pkexec firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "port": port},
-            rollback=f"sudo firewall-cmd --add-port={sport} --permanent && sudo firewall-cmd --reload",
+            rollback=f"pkexec firewall-cmd --add-port={sport} --permanent && pkexec firewall-cmd --reload",
         )
     elif action == "add-service" and service:
         ssvc = shlex.quote(service)
         result = run_audited(
-            f"sudo firewall-cmd --add-service={ssvc} --permanent && sudo firewall-cmd --reload",
+            f"pkexec firewall-cmd --add-service={ssvc} --permanent && pkexec firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "service": service},
-            rollback=f"sudo firewall-cmd --remove-service={ssvc} --permanent && sudo firewall-cmd --reload",
+            rollback=f"pkexec firewall-cmd --remove-service={ssvc} --permanent && pkexec firewall-cmd --reload",
         )
     elif action == "remove-service" and service:
         ssvc = shlex.quote(service)
         result = run_audited(
-            f"sudo firewall-cmd --remove-service={ssvc} --permanent && sudo firewall-cmd --reload",
+            f"pkexec firewall-cmd --remove-service={ssvc} --permanent && pkexec firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "service": service},
-            rollback=f"sudo firewall-cmd --add-service={ssvc} --permanent && sudo firewall-cmd --reload",
+            rollback=f"pkexec firewall-cmd --add-service={ssvc} --permanent && pkexec firewall-cmd --reload",
         )
     else:
         return "Usage: action='list|add-port|remove-port|add-service|remove-service'"
@@ -147,11 +162,8 @@ def manage_firewall(
     return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
 
 
-def manage_tailscale(action: str) -> str:
-    """Manage Tailscale VPN."""
-    valid = ["status", "up", "down", "ip", "peers"]
-    if action not in valid:
-        return f"Unknown action '{action}'. Supported: {', '.join(valid)}."
+def manage_tailscale(action: Literal["status", "up", "down", "ip", "peers"]) -> str:
+    """Manage Tailscale VPN. Use 'status' or 'peers' to check state, 'up'/'down' to toggle."""
 
     if action == "peers":
         result = run_command("tailscale status")

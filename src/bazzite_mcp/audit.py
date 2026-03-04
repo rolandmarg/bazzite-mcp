@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
 
 
@@ -6,6 +8,15 @@ class AuditLog:
         db_path = get_db_path("audit_log.db")
         self._conn = get_connection(db_path)
         ensure_tables(self._conn, "audit")
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def __enter__(self) -> AuditLog:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     def record(
         self,

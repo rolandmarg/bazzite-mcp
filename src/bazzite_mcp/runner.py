@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import json
+import logging
 import subprocess
 from dataclasses import dataclass
 
 from bazzite_mcp.guardrails import check_command
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,6 +69,7 @@ def run_audited(
             output=(result.stdout[:500] if result.stdout else None),
             rollback=rollback,
         )
-    except Exception:
-        pass  # Don't let audit failures break tool execution
+    except Exception as exc:
+        logger.error("Audit logging failed for tool=%s command=%s: %s", tool, command, exc)
+        result.warning = (result.warning or "") + f" [AUDIT FAILED: {exc}]"
     return result

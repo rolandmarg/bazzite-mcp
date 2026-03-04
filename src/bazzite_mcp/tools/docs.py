@@ -90,8 +90,10 @@ def _ensure_fresh_docs_cache(cache: DocsCache) -> tuple[DocsCache, str]:
 
 
 def query_bazzite_docs(query: str) -> str:
-    """Full-text search cached Bazzite docs.
+    """Keyword search over cached Bazzite documentation (FTS5).
 
+    Best for: exact terms, command names, package names, error messages.
+    Use semantic_search_docs instead for natural language questions.
     Auto-refreshes cache when empty or stale.
     """
     cache = DocsCache()
@@ -117,13 +119,12 @@ def query_bazzite_docs(query: str) -> str:
 
 
 def semantic_search_docs(query: str, limit: int = 5) -> str:
-    """Semantic similarity search over cached Bazzite docs.
+    """Semantic similarity search over cached Bazzite docs using AI embeddings.
 
-    Uses embeddings for meaning-based matching (e.g. 'how to run android apps'
-    finds Waydroid docs even without exact keyword match).
-    Auto-refreshes cache when empty or stale.
-    Requires an embedding API key to be configured.
-    Falls back to FTS5 keyword search if embeddings are unavailable.
+    Best for: natural language questions where exact keywords may not match
+    (e.g. 'how to run android apps' finds Waydroid docs).
+    Use query_bazzite_docs instead for exact keyword/command name lookups.
+    Falls back to keyword search if embeddings are unavailable.
     """
     cache = DocsCache()
     cache, refresh_note = _ensure_fresh_docs_cache(cache)

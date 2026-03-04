@@ -3,6 +3,7 @@ from fastmcp import FastMCP
 from bazzite_mcp.resources import (
     get_docs_index,
     get_install_hierarchy,
+    get_install_policy_resource,
     get_server_info,
     get_system_overview,
 )
@@ -67,7 +68,18 @@ from bazzite_mcp.tools.system import (
 from bazzite_mcp.tools.ujust import ujust_list, ujust_run, ujust_show
 
 
-mcp = FastMCP("bazzite")
+mcp = FastMCP(
+    "bazzite",
+    instructions=(
+        "Bazzite OS management server. Key principles:\n"
+        "1. Always check ujust first for system operations (ujust_list, ujust_show, ujust_run)\n"
+        "2. Follow the 6-tier install hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree\n"
+        "3. Use query_bazzite_docs for keyword lookups, semantic_search_docs for natural language questions\n"
+        "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
+        "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
+        "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing"
+    ),
+)
 
 # ujust (Tier 1)
 mcp.tool(ujust_run)
@@ -136,7 +148,87 @@ mcp.tool(list_pending_prs)
 mcp.tool(get_server_source)
 
 # MCP Resources — read-only context
-mcp.resource("bazzite://system/overview")(get_system_overview)
-mcp.resource("bazzite://install/hierarchy")(get_install_hierarchy)
-mcp.resource("bazzite://docs/index")(get_docs_index)
-mcp.resource("bazzite://server/info")(get_server_info)
+mcp.resource(
+    "bazzite://system/overview",
+    description="Current OS, kernel, desktop, and hardware summary",
+    mime_type="text/markdown",
+)(get_system_overview)
+mcp.resource(
+    "bazzite://install/hierarchy",
+    description="Bazzite's 6-tier install hierarchy with per-category recommendations",
+    mime_type="text/markdown",
+)(get_install_hierarchy)
+mcp.resource(
+    "bazzite://install/policy",
+    description="Quick-reference install policy (ujust > flatpak > brew > distrobox > AppImage > rpm-ostree)",
+    mime_type="text/plain",
+)(get_install_policy_resource)
+mcp.resource(
+    "bazzite://docs/index",
+    description="Index of all cached documentation pages with sections and URLs",
+    mime_type="text/markdown",
+)(get_docs_index)
+mcp.resource(
+    "bazzite://server/info",
+    description="bazzite-mcp server metadata: config, cache status, versions",
+    mime_type="text/markdown",
+)(get_server_info)
+
+
+# MCP Prompts — reusable workflow templates
+@mcp.prompt()
+def troubleshoot_system(symptom: str) -> str:
+    """Gather diagnostics for a system issue. Collects logs, hardware info, and service status."""
+    return (
+        f"The user is experiencing: {symptom}\n\n"
+        "Diagnostic steps:\n"
+        "1. Run system_info to get OS/kernel/desktop\n"
+        "2. Run journal_logs with relevant unit or priority='err' to find errors\n"
+        "3. Run hardware_info if it might be hardware-related\n"
+        "4. Run service_status for relevant services\n"
+        "5. Search docs with query_bazzite_docs or semantic_search_docs\n"
+        "6. Check update_status for pending OS updates\n\n"
+        "Provide a summary of findings and recommended fixes."
+    )
+
+
+@mcp.prompt()
+def install_app(app_name: str) -> str:
+    """Walk through the 6-tier install hierarchy to find and install an app."""
+    return (
+        f"Install '{app_name}' following Bazzite's 6-tier hierarchy:\n\n"
+        "1. First, run search_package to check ujust, flatpak, and brew\n"
+        "2. If found in ujust (Tier 1), use ujust_run\n"
+        "3. If found in flatpak (Tier 2), install via install_package with method='flatpak'\n"
+        "4. If found in brew (Tier 3), install via install_package with method='brew'\n"
+        "5. If not found, consider creating a distrobox container\n"
+        "6. rpm-ostree is the absolute last resort\n\n"
+        "Always explain which tier you chose and why."
+    )
+
+
+@mcp.prompt()
+def setup_dev_environment(language: str) -> str:
+    """Set up a development environment using distrobox."""
+    return (
+        f"Set up a {language} development environment:\n\n"
+        "1. Create a distrobox with create_distrobox (ubuntu or fedora image)\n"
+        "2. Use exec_in_distrobox to install the language toolchain\n"
+        "3. Use export_distrobox_app to export any GUI tools to the host menu\n"
+        "4. Explain how to enter the container for interactive work\n\n"
+        "This keeps the immutable host clean while giving full package access."
+    )
+
+
+@mcp.prompt()
+def diagnose_service(service_name: str) -> str:
+    """Debug a failing or misbehaving systemd service."""
+    return (
+        f"Diagnose the systemd service '{service_name}':\n\n"
+        "1. Run service_status to see current state\n"
+        "2. Run journal_logs with unit='{service_name}' to see recent logs\n"
+        "3. Check if the service is enabled with list_services(state='enabled')\n"
+        "4. If failed, check journal_logs with priority='err'\n"
+        "5. Search bazzite docs for known issues with this service\n\n"
+        "Provide diagnosis and recommended fix."
+    )

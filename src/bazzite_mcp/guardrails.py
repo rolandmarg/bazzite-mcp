@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import re
+import shlex
 from dataclasses import dataclass
 
 
@@ -11,6 +14,52 @@ class CheckResult:
     allowed: bool
     warning: str | None = None
 
+
+# Commands allowed as the first word of a shell command.
+# Everything else is blocked by default.
+ALLOWED_COMMAND_PREFIXES = frozenset({
+    "brew",
+    "cat",
+    "df",
+    "distrobox",
+    "distrobox-export",
+    "echo",
+    "false",
+    "firewall-cmd",
+    "flatpak",
+    "free",
+    "gh",
+    "git",
+    "gnome-randr",
+    "grep",
+    "head",
+    "hostnamectl",
+    "hostname",
+    "ip",
+    "journalctl",
+    "lsblk",
+    "lscpu",
+    "lspci",
+    "mkdir",
+    "nmcli",
+    "pactl",
+    "pkexec",
+    "podman",
+    "powerprofilesctl",
+    "ps",
+    "python3",
+    "rpm-ostree",
+    "sensors",
+    "sudo",
+    "systemctl",
+    "gsettings",
+    "tailscale",
+    "true",
+    "uname",
+    "ujust",
+    "waydroid",
+    "xrandr",
+})
 
 BLOCKED_PATTERNS = [
     (r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+.*)?/\s*$", "destructive filesystem operation"),
@@ -40,6 +89,14 @@ BLOCKED_PATTERNS = [
     (r"\bwhile\s+true\b.*\bdone\b", "infinite loop detected"),
     # Privilege escalation via path
     (r"/usr/s?bin/rm\b", "use rm without full path"),
+    # Network exfiltration
+    (r"\bcurl\b", "curl is blocked; use httpx in Python instead"),
+    (r"\bwget\b", "wget is blocked; use httpx in Python instead"),
+    (r"\bnc\b", "netcat is blocked for safety"),
+    (r"\bncat\b", "ncat is blocked for safety"),
+    # Dangerous redirects
+    (r">\s*/etc/", "writing to /etc is blocked"),
+    (r">\s*/dev/", "writing to /dev is blocked"),
 ]
 
 WARN_PATTERNS = [
@@ -52,10 +109,35 @@ WARN_PATTERNS = [
 HOSTNAME_RE = re.compile(r"\bhostnamectl\s+set-hostname\s+(\S+)")
 
 
+def _extract_command_prefix(command: str) -> str | None:
+    """Extract the first command from a shell string for allowlist checking."""
+    # Strip leading env assignments (FOO=bar cmd ...)
+    stripped = command.strip()
+    while re.match(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+", stripped):
+        stripped = re.sub(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+", "", stripped)
+    try:
+        parts = shlex.split(stripped)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    # Get the basename of the command (in case of /usr/bin/foo)
+    cmd = parts[0].rsplit("/", 1)[-1]
+    return cmd
+
+
 def check_command(command: str) -> CheckResult:
+    # Check blocked patterns first (these override everything)
     for pattern, reason in BLOCKED_PATTERNS:
         if re.search(pattern, command):
             raise GuardrailError(f"Blocked: {reason}")
+
+    # Check command allowlist
+    prefix = _extract_command_prefix(command)
+    if prefix and prefix not in ALLOWED_COMMAND_PREFIXES:
+        raise GuardrailError(
+            f"Blocked: command '{prefix}' is not in the allowed command list"
+        )
 
     hostname_match = HOSTNAME_RE.search(command)
     if hostname_match:

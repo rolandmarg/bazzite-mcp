@@ -12,7 +12,7 @@ def test_audit_log_query_empty(tmp_path, monkeypatch) -> None:
 # --- rollback_action tests ---
 
 
-@patch("bazzite_mcp.tools.audit_tools.run_command")
+@patch("bazzite_mcp.tools.audit_tools.run_audited")
 @patch("bazzite_mcp.tools.audit_tools.AuditLog")
 def test_rollback_action_success(mock_log_cls: MagicMock, mock_run: MagicMock) -> None:
     mock_log = MagicMock()
@@ -26,7 +26,7 @@ def test_rollback_action_success(mock_log_cls: MagicMock, mock_run: MagicMock) -
     assert "Success" in result
 
 
-@patch("bazzite_mcp.tools.audit_tools.run_command")
+@patch("bazzite_mcp.tools.audit_tools.run_audited")
 @patch("bazzite_mcp.tools.audit_tools.AuditLog")
 def test_rollback_action_no_matching_action(mock_log_cls: MagicMock, mock_run: MagicMock) -> None:
     mock_log = MagicMock()

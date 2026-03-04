@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import shlex
+from typing import Literal
 
 from bazzite_mcp.runner import run_audited, run_command
 
 
-def set_theme(mode: str) -> str:
-    """Switch between light, dark, or auto color scheme."""
+def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
+    """Switch between light, dark, or auto color scheme (GNOME only)."""
     schemes = {
         "dark": "prefer-dark",
         "light": "prefer-light",
@@ -98,11 +101,8 @@ def set_display_config(
     )
 
 
-def set_power_profile(profile: str) -> str:
-    """Switch power profile."""
-    valid = ["performance", "balanced", "power-saver"]
-    if profile not in valid:
-        return f"Unknown profile '{profile}'. Supported: {', '.join(valid)}."
+def set_power_profile(profile: Literal["performance", "balanced", "power-saver"]) -> str:
+    """Switch power profile between performance, balanced, or power-saver."""
 
     result = run_audited(
         f"powerprofilesctl set {profile}",

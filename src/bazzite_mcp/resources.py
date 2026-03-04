@@ -1,8 +1,10 @@
 """MCP resources — read-only context for AI agents."""
 
+from bazzite_mcp import __version__
 from bazzite_mcp.cache.docs_cache import DocsCache
 from bazzite_mcp.config import load_config
 from bazzite_mcp.tools.docs import install_policy
+from bazzite_mcp.tools.packages import INSTALL_POLICY
 from bazzite_mcp.tools.system import system_info
 
 
@@ -21,6 +23,11 @@ def get_install_hierarchy() -> str:
     for tier in tiers:
         parts.append(f"## {tier}\n{install_policy(tier)}\n")
     return "\n".join(parts)
+
+
+def get_install_policy_resource() -> str:
+    """Quick-reference install policy string."""
+    return INSTALL_POLICY
 
 
 def get_docs_index() -> str:
@@ -47,11 +54,12 @@ def get_server_info() -> str:
     cfg = load_config()
     cache = DocsCache()
     return (
-        f"# bazzite-mcp\n\n"
+        f"# bazzite-mcp v{__version__}\n\n"
         f"Repo: {cfg.repo_slug}\n"
         f"Docs source: {cfg.docs_base_url}\n"
         f"Cache TTL: {cfg.cache_ttl_seconds() // 3600} hours\n"
         f"Max crawl pages: {cfg.crawl_max_pages}\n"
         f"Cached pages: {cache.page_count()}\n"
         f"Cache stale: {cache.is_stale()}\n"
+        f"Embedding provider: {cfg.embedding_provider}\n"
     )

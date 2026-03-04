@@ -5,6 +5,8 @@ Embeddings are generated during cache refresh, then stored as raw float32
 blobs in SQLite for offline semantic search.
 """
 
+from __future__ import annotations
+
 import os
 import struct
 from sqlite3 import Connection
@@ -13,21 +15,37 @@ import httpx
 
 from bazzite_mcp.config import load_config
 
+# Minimum cosine similarity to include in search results
+MIN_SIMILARITY_THRESHOLD = 0.3
+
+# Overlap between chunks (in characters) to preserve context at boundaries
+CHUNK_OVERLAP = 200
+
 
 def _get_api_key() -> str | None:
     cfg = load_config()
     return os.environ.get(cfg.embedding_api_key_env)
 
 
+def _current_model_id() -> str:
+    """Return a string identifying the current embedding provider+model."""
+    cfg = load_config()
+    return f"{cfg.embedding_provider}/{cfg.embedding_model}"
+
+
 def _chunk_text(text: str, chunk_size: int) -> list[str]:
-    """Split text into chunks at paragraph boundaries."""
+    """Split text into chunks at paragraph boundaries with overlap."""
     paragraphs = text.split("\n\n")
     chunks: list[str] = []
     current = ""
     for para in paragraphs:
         if len(current) + len(para) + 2 > chunk_size and current:
             chunks.append(current.strip())
-            current = para
+            # Keep overlap from the end of previous chunk
+            if CHUNK_OVERLAP > 0 and len(current) > CHUNK_OVERLAP:
+                current = current[-CHUNK_OVERLAP:] + "\n\n" + para
+            else:
+                current = para
         else:
             current = current + "\n\n" + para if current else para
     if current.strip():
@@ -74,8 +92,7 @@ def _embed_gemini(texts: list[str], api_key: str) -> list[list[float]] | None:
     try:
         response = httpx.post(
             f"{base_url}/models/{model}:batchEmbedContents",
-            headers={"Content-Type": "application/json"},
-            params={"key": api_key},
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
             json={"requests": requests},
             timeout=120,
         )
@@ -104,8 +121,7 @@ def _embed_gemini_query(texts: list[str], api_key: str) -> list[list[float]] | N
     try:
         response = httpx.post(
             f"{base_url}/models/{model}:batchEmbedContents",
-            headers={"Content-Type": "application/json"},
-            params={"key": api_key},
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
             json={"requests": requests},
             timeout=60,
         )
@@ -160,12 +176,24 @@ def generate_embeddings(texts: list[str], query: bool = False) -> list[list[floa
 def embed_pages(conn: Connection) -> tuple[int, list[str]]:
     """Generate embeddings for all pages that don't have them yet.
 
+    Invalidates embeddings from a different model before re-embedding.
     Returns (count_embedded, errors).
     """
     cfg = load_config()
     api_key = _get_api_key()
     if not api_key:
         return 0, [f"No API key found in ${cfg.embedding_api_key_env}. Set it to enable semantic search."]
+
+    model_id = _current_model_id()
+
+    # Invalidate embeddings from a different model
+    stale = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM embeddings WHERE model != ? AND model != ''",
+        (model_id,),
+    ).fetchone()
+    if stale and stale["cnt"] > 0:
+        conn.execute("DELETE FROM embeddings WHERE model != ?", (model_id,))
+        conn.commit()
 
     # Find pages without embeddings
     rows = conn.execute(
@@ -204,9 +232,9 @@ def embed_pages(conn: Connection) -> tuple[int, list[str]]:
 
         for (page_id, chunk_idx, chunk_text), vec in zip(all_chunks, vectors):
             conn.execute(
-                "INSERT OR REPLACE INTO embeddings (page_id, chunk_index, chunk_text, embedding, dimensions) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (page_id, chunk_idx, chunk_text, _encode_vector(vec), len(vec)),
+                "INSERT OR REPLACE INTO embeddings (page_id, chunk_index, chunk_text, embedding, dimensions, model) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (page_id, chunk_idx, chunk_text, _encode_vector(vec), len(vec), model_id),
             )
             embedded += 1
 
@@ -219,6 +247,7 @@ def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
     """Search cached docs by semantic similarity.
 
     Embeds the query via API, then ranks stored chunks by cosine similarity.
+    Filters out results below MIN_SIMILARITY_THRESHOLD.
     """
     query_vecs = generate_embeddings([query], query=True)
     if query_vecs is None:
@@ -238,6 +267,8 @@ def semantic_search(conn: Connection, query: str, limit: int = 5) -> list[dict]:
     for row in rows:
         stored_vec = _decode_vector(row["embedding"], row["dimensions"])
         sim = _cosine_similarity(query_vec, stored_vec)
+        if sim < MIN_SIMILARITY_THRESHOLD:
+            continue
         scored.append((sim, {
             "title": row["title"],
             "section": row["section"],

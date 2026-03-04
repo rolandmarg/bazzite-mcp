@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
     chunk_text TEXT NOT NULL,
     embedding BLOB NOT NULL,
     dimensions INTEGER NOT NULL,
+    model TEXT DEFAULT '',
     FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
     UNIQUE(page_id, chunk_index)
 );

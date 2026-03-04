@@ -23,6 +23,15 @@ class DocsCache:
         self._conn = get_connection(db_path)
         ensure_tables(self._conn, "cache")
 
+    def close(self) -> None:
+        self._conn.close()
+
+    def __enter__(self) -> "DocsCache":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     def store_page(self, url: str, title: str, content: str, section: str) -> None:
         self._conn.execute(
             "INSERT OR REPLACE INTO pages (url, title, content, section, fetched_at) VALUES (?, ?, ?, ?, ?)",

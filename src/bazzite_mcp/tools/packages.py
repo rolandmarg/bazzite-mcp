@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import shlex
+from typing import Literal
 
 from bazzite_mcp.runner import run_audited, run_command
 
@@ -12,8 +15,14 @@ INSTALL_POLICY = """Bazzite 6-tier install hierarchy (official docs.bazzite.gg):
 6. rpm-ostree - last resort. Can freeze updates, block rebasing, cause conflicts."""
 
 
-def install_package(package: str, method: str | None = None) -> str:
-    """Install package following Bazzite hierarchy or explicit method."""
+def install_package(
+    package: str,
+    method: Literal["flatpak", "brew", "rpm-ostree", "ujust"] | None = None,
+) -> str:
+    """Install package following Bazzite's 6-tier hierarchy, or use an explicit method.
+
+    When no method is specified, searches ujust > flatpak > brew automatically.
+    """
     if method:
         return _install_with_method(package, method)
 
@@ -80,8 +89,8 @@ def _install_with_method(package: str, method: str) -> str:
     return f"Installed '{package}' via {method}:\n{output}"
 
 
-def remove_package(package: str, method: str) -> str:
-    """Remove package via original install method."""
+def remove_package(package: str, method: Literal["flatpak", "brew", "rpm-ostree"]) -> str:
+    """Remove package via its original install method."""
     pkg = shlex.quote(package)
     method_commands = {
         "flatpak": f"flatpak uninstall -y {pkg}",
@@ -133,8 +142,8 @@ def search_package(package: str) -> str:
     return "\n\n".join(parts) + f"\n\n{INSTALL_POLICY}"
 
 
-def list_packages(source: str | None = None) -> str:
-    """List installed packages by source or all."""
+def list_packages(source: Literal["flatpak", "brew", "rpm-ostree"] | None = None) -> str:
+    """List installed packages by source, or all sources if omitted."""
     parts: list[str] = []
     sources = [source] if source else ["flatpak", "brew", "rpm-ostree"]
 
@@ -158,8 +167,8 @@ def list_packages(source: str | None = None) -> str:
     return "\n\n".join(parts) if parts else "No packages found."
 
 
-def update_packages(source: str | None = None) -> str:
-    """Update packages by source."""
+def update_packages(source: Literal["system", "flatpak", "brew"] | None = None) -> str:
+    """Update packages by source, or run full system update if omitted."""
     if source in (None, "system"):
         result = run_audited("ujust update", tool="update_packages", args={"source": "system"})
         return f"System update:\n{result.stdout}"

@@ -64,7 +64,7 @@ class Config:
     embedding_model: str = "gemini-embedding-001"
     embedding_api_key_env: str = "GEMINI_API_KEY"
     embedding_dimensions: int = 768
-    embedding_chunk_size: int = 2000
+    embedding_chunk_size: int = 1000
 
     # Audit
     audit_output_max_chars: int = 500
@@ -112,7 +112,10 @@ def load_config() -> Config:
         val = os.environ.get(env_key)
         if val is not None:
             field_type = type(getattr(cfg, attr))
-            setattr(cfg, attr, field_type(val))
+            try:
+                setattr(cfg, attr, field_type(val))
+            except (ValueError, TypeError):
+                pass  # Ignore invalid env var values, keep default
 
     _config = cfg
     return cfg

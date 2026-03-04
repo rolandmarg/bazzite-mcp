@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import shlex
+from typing import Literal
 
 from bazzite_mcp.runner import run_audited, run_command
 
@@ -34,8 +37,8 @@ def create_distrobox(name: str, image: str | None = None) -> str:
     return f"Container '{name}' created with image '{image}'.\nEnter with: distrobox enter {name}"
 
 
-def manage_distrobox(name: str, action: str) -> str:
-    """Manage a distrobox container."""
+def manage_distrobox(name: str, action: Literal["enter", "stop", "remove"]) -> str:
+    """Manage a distrobox container (enter, stop, or remove)."""
     sname = shlex.quote(name)
     if action == "enter":
         return (
@@ -68,8 +71,21 @@ def list_distroboxes() -> str:
 
 
 def exec_in_distrobox(name: str, command: str) -> str:
-    """Run a command inside a specific distrobox container."""
-    result = run_command(f"distrobox enter {shlex.quote(name)} -- {command}")
+    """Run a command inside a specific distrobox container.
+
+    Use this to install packages, run builds, or execute tools inside a distrobox.
+    The command runs inside the container, not on the host.
+    """
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return "Invalid command syntax."
+    safe_cmd = shlex.join(parts)
+    result = run_audited(
+        f"distrobox enter {shlex.quote(name)} -- {safe_cmd}",
+        tool="exec_in_distrobox",
+        args={"name": name, "command": command},
+    )
     output = result.stdout
     if result.stderr:
         output += f"\nSTDERR: {result.stderr}"
@@ -89,11 +105,15 @@ def export_distrobox_app(name: str, app: str) -> str:
 
 
 def manage_quadlet(
-    action: str,
+    action: Literal["list", "create", "start", "stop", "status", "remove"],
     name: str | None = None,
     image: str | None = None,
 ) -> str:
-    """Manage Quadlet units for persistent containerized services."""
+    """Manage Quadlet units for persistent containerized services.
+
+    Quadlet combines systemd + podman for declarative container services.
+    Use 'list' to see existing services, 'create' to make a new one.
+    """
     if action == "list":
         result = run_command(
             "systemctl --user list-units --type=service 'podman-*' --no-pager 2>/dev/null"
@@ -129,23 +149,46 @@ WantedBy=default.target
     return "Usage: action='list|create|start|stop|status|remove', name=<service>, image=<image>"
 
 
-def manage_podman(action: str, args: str = "") -> str:
-    """Run podman container operations."""
-    valid_actions = ("run", "stop", "rm", "pull", "ps", "images", "logs", "inspect", "exec")
-    if action not in valid_actions:
-        return f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}"
+def manage_podman(
+    action: Literal["run", "stop", "rm", "pull", "ps", "images", "logs", "inspect", "exec"],
+    container: str = "",
+    image: str = "",
+) -> str:
+    """Run podman container operations.
+
+    Use 'ps' to list running containers, 'images' to list images.
+    Use 'run' with an image, 'stop'/'rm' with a container name/ID.
+    Use 'logs'/'inspect' with a container name/ID.
+    """
+    BLOCKED_FLAGS = ("--privileged", "--pid=host", "--net=host", "-v /:/")
+    parts: list[str] = ["podman", action]
+
+    if action in ("run", "pull") and image:
+        # Block dangerous flags
+        for flag in BLOCKED_FLAGS:
+            if flag in image:
+                return f"Blocked: '{flag}' is not allowed for safety."
+        parts.append(shlex.quote(image))
+    elif action in ("stop", "rm", "logs", "inspect", "exec") and container:
+        parts.append(shlex.quote(container))
+    elif action in ("ps", "images"):
+        pass  # No extra args needed
+    elif action == "run" and not image:
+        return "Error: 'image' is required for podman run."
+
+    cmd = " ".join(parts)
     if action in ("run", "stop", "rm", "pull"):
         result = run_audited(
-            f"podman {action} {args}",
+            cmd,
             tool="manage_podman",
-            args={"action": action, "args": args},
+            args={"action": action, "container": container, "image": image},
         )
     else:
-        result = run_command(f"podman {action} {args}")
+        result = run_command(cmd)
     return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
 
 
-def manage_waydroid(action: str) -> str:
+def manage_waydroid(action: Literal["setup", "status", "start", "stop"]) -> str:
     """Manage Waydroid for running Android apps."""
     if action == "setup":
         return "Run: ujust setup-waydroid\n\nThis sets up Waydroid with Google Play support."
