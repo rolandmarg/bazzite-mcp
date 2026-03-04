@@ -58,6 +58,7 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "true",
         "uname",
         "ujust",
+        "vulkaninfo",
         "waydroid",
         "xrandr",
     }

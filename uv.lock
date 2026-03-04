@@ -74,6 +74,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastmcp" },
     { name = "httpx" },
+    { name = "vdf" },
 ]
 
 [package.dev-dependencies]
@@ -86,6 +87,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.14.3" },
     { name = "fastmcp", specifier = ">=3.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "vdf", specifier = ">=3.4" },
 ]
 
 [package.metadata.requires-dev]
@@ -1253,6 +1255,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/32/ce/eeb58ae4ac36fe09e3842eb02e0eb676bf2c53ae062b98f1b2531673efdd/uvicorn-0.41.0.tar.gz", hash = "sha256:09d11cf7008da33113824ee5a1c6422d89fbc2ff476540d69a34c87fab8b571a", size = 82633, upload-time = "2026-02-16T23:07:24.1Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/83/e4/d04a086285c20886c0daad0e026f250869201013d18f81d9ff5eada73a88/uvicorn-0.41.0-py3-none-any.whl", hash = "sha256:29e35b1d2c36a04b9e180d4007ede3bcb32a85fbdfd6c6aeb3f26839de088187", size = 68783, upload-time = "2026-02-16T23:07:22.357Z" },
+]
+
+[[package]]
+name = "vdf"
+version = "3.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/7f/74192f47d67c8bf3c47bf0d8487b3457614c2c98d58b6617721d217f3f79/vdf-3.4.tar.gz", hash = "sha256:fd5419f41e07a1009e5ffd027c7dcbe43d1f7e8ef453aeaa90d9d04b807de2af", size = 11132, upload-time = "2021-05-22T09:26:05.252Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/60/6456b687cf55cf60020dcd01f9bc51561c3cc84f05fd8e0feb71ce60f894/vdf-3.4-py2.py3-none-any.whl", hash = "sha256:68c1a125cc49e343d535af2dd25074e9cb0908c6607f073947c4a04bbe234534", size = 10357, upload-time = "2021-05-22T09:26:03.948Z" },
 ]
 
 [[package]]

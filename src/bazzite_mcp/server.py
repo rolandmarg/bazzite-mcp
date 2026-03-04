@@ -24,6 +24,7 @@ from bazzite_mcp.tools.docs import (
     query_bazzite_docs,
     refresh_docs_cache,
 )
+from bazzite_mcp.tools.gaming import game_reports, game_settings, steam_library
 from bazzite_mcp.tools.packages import (
     install_package,
     list_packages,
@@ -69,7 +70,10 @@ mcp = FastMCP(
         "3. Use query_bazzite_docs to search cached documentation\n"
         "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
         "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
-        "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing"
+        "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing\n"
+        "7. For gaming: use steam_library to find games, game_reports for community optimization data, "
+        "game_settings to apply MangoHud/launch options. Use hardware_info + game_reports to make "
+        "hardware-aware recommendations. Existing manage_service covers GameMode."
     ),
 )
 
@@ -130,6 +134,11 @@ mcp.tool(refresh_docs_cache)
 # Audit
 mcp.tool(audit_log_query)
 mcp.tool(rollback_action)
+
+# Gaming
+mcp.tool(steam_library)
+mcp.tool(game_reports)
+mcp.tool(game_settings)
 
 # MCP Resources — read-only context
 mcp.resource(
@@ -215,4 +224,23 @@ def diagnose_service(service_name: str) -> str:
         "4. If failed, check journal_logs with priority='err'\n"
         "5. Search bazzite docs for known issues with this service\n\n"
         "Provide diagnosis and recommended fix."
+    )
+
+
+@mcp.prompt()
+def optimize_game(game_name: str) -> str:
+    """Optimize a game's settings based on hardware and community data."""
+    return (
+        f"Optimize '{game_name}' for this system:\n\n"
+        "1. Run steam_library to find the game and get its app ID\n"
+        "2. Run hardware_info to get GPU, CPU, and RAM details\n"
+        "3. Run game_reports with the app ID to get ProtonDB community data\n"
+        "4. Based on hardware + community reports, determine:\n"
+        "   - Best Proton version to use\n"
+        "   - Gamescope launch flags (resolution, scaler, FPS limit)\n"
+        "   - MangoHud monitoring settings\n"
+        "   - Whether to enable GameMode\n"
+        "5. Apply settings with game_settings tool\n"
+        "6. Enable GameMode if recommended: manage_service(name='gamemoded', action='enable', user=True)\n\n"
+        "Explain each recommendation and why it suits this hardware."
     )

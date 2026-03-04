@@ -110,6 +110,11 @@ def test_allows_safe_brew_install() -> None:
     assert result.allowed is True
 
 
+def test_allows_vulkaninfo() -> None:
+    result = check_command("vulkaninfo --summary")
+    assert result.allowed is True
+
+
 def test_allows_ujust_summary_stderr_redirect() -> None:
     result = check_command("ujust --summary 2>/dev/null")
     assert result.allowed is True

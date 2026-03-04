@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS changelogs (
     date TEXT,
     body TEXT
 );
+
+CREATE TABLE IF NOT EXISTS game_reports (
+    app_id INTEGER PRIMARY KEY,
+    protondb_summary TEXT,
+    protondb_reports TEXT,
+    pcgamingwiki_data TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -79,5 +87,3 @@ def ensure_tables(conn: sqlite3.Connection, db_type: str) -> None:
     elif db_type == "cache":
         conn.executescript(CACHE_SCHEMA)
     conn.commit()
-
-
