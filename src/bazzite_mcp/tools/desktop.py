@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 from textwrap import dedent
+from typing import Literal
 
 from mcp.server.fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
@@ -397,7 +398,7 @@ _ATSPI_HELPER = dedent("""\
         app = find_app(cmd["query"])
         if not app:
             print(json.dumps({"error": f"App not found: {cmd['query']}",
-                              "hint": "App may not expose accessibility data. Use screenshot_window for visual inspection."}))
+                              "hint": "App may not expose accessibility data. Use screenshot(target='window') for visual inspection."}))
         else:
             trees = []
             for j in range(app.get_child_count()):
@@ -497,30 +498,17 @@ def _shell_quote(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Public MCP tools — Vision
+# Private tool implementations
 # ---------------------------------------------------------------------------
 
 
-def screenshot() -> Image:
-    """Capture the full desktop and return a compressed, AI-vision-ready JPEG.
-
-    Returns the image inline — no file path to read separately.
-    Uses Spectacle (KDE) for capture and ImageMagick for JPEG compression.
-    Falls back to raw PNG if ImageMagick is not available.
-    """
+def _screenshot_desktop() -> Image:
+    """Capture the full desktop."""
     return _capture_and_compress("--fullscreen")
 
 
-def screenshot_window(window: str) -> Image:
-    """Capture a specific window and return the image inline.
-
-    The window is briefly activated for capture, then focus is restored.
-    Use this as a fallback when inspect_window returns no accessibility data
-    (e.g., games, Electron apps without a11y flags).
-
-    Args:
-        window: Window UUID, title substring, or window class to match.
-    """
+def _screenshot_window(window: str) -> Image:
+    """Capture a specific window."""
     uuid = _resolve_window(window)
     prev_active = _kwin_get_active_uuid()
 
@@ -538,141 +526,30 @@ def screenshot_window(window: str) -> Image:
     return img
 
 
-# ---------------------------------------------------------------------------
-# Public MCP tools — Window management
-# ---------------------------------------------------------------------------
-
-
-def list_windows() -> str:
-    """List all open windows with their ID, title, class, geometry, and state.
-
-    Returns JSON array. Use the 'id' or 'title' to target a window in other tools.
-    """
+def _list_windows() -> str:
+    """List all open windows with their ID, title, class, geometry, and state."""
     windows = _kwin_get_windows()
     if not windows:
         return "No windows found."
     return json.dumps(windows, indent=2)
 
 
-def activate_window(window: str) -> str:
-    """Bring a window to focus and raise it to the front.
-
-    Args:
-        window: Window UUID, title substring, or window class to match.
-    """
+def _activate_window(window: str) -> str:
+    """Bring a window to focus and raise it to the front."""
     uuid = _resolve_window(window)
     _kwin_activate(uuid)
     info = _kwin_get_window_info(uuid)
     return f"Activated: {info.get('caption', window)}"
 
 
-# ---------------------------------------------------------------------------
-# Public MCP tools — Accessibility / structured inspection
-# ---------------------------------------------------------------------------
-
-
-def inspect_window(window: str, depth: int = 6) -> str:
-    """Get the structured widget tree of a window via AT-SPI accessibility API.
-
-    Returns JSON with every widget's role, name, states, geometry, available
-    actions, and text content. This is the PREFERRED way to understand a window —
-    faster and more reliable than screenshots for UI interaction.
-
-    Works best with KDE/Qt and GTK apps. Chromium/Electron apps need
-    --force-renderer-accessibility. Games and Wine apps have no a11y data;
-    use screenshot_window for those.
-
-    Args:
-        window: App name, window title substring, or process name to match.
-        depth: Max widget tree depth (default 6). Increase for deeply nested UIs.
-    """
+def _inspect_window(window: str, depth: int = 6) -> str:
+    """Get the structured widget tree of a window via AT-SPI accessibility API."""
     result = _atspi_call({"op": "inspect", "query": window, "depth": depth})
     return json.dumps(result, indent=2)
 
 
-def interact(
-    window: str,
-    element: str,
-    action: str = "Press",
-) -> str:
-    """Perform an action on a UI element using the AT-SPI accessibility API.
-
-    This directly invokes actions on widgets without needing coordinates or
-    screenshots. Much more reliable than mouse clicks for supported apps.
-
-    Common actions: 'Press' (buttons), 'Toggle' (checkboxes), 'SetFocus'
-    (text fields), 'ShowMenu' (dropdown menus), 'Activate' (menu items).
-
-    Use inspect_window first to discover available elements and their actions.
-
-    Args:
-        window: App name or window title to target.
-        element: Element to find — matches against name, role, or text content.
-        action: Action to perform (default 'Press').
-    """
-    result = _atspi_call({
-        "op": "do_action",
-        "app": window,
-        "element": element,
-        "action": action,
-    })
-
-    if result.get("error"):
-        raise ToolError(result["error"])
-
-    if result.get("found") and result.get("did_action"):
-        el = result.get("element", {})
-        return f"Performed '{action}' on {el.get('role', '?')}: \"{el.get('name', element)}\""
-
-    raise ToolError(
-        f"Action '{action}' failed on element '{element}'. "
-        "Use inspect_window to check available elements and actions."
-    )
-
-
-def set_text(window: str, element: str, text: str) -> str:
-    """Set text content of an editable field via AT-SPI.
-
-    Directly sets the value without simulating keypresses. Works on text
-    inputs, text areas, and other editable widgets in accessible apps.
-
-    Args:
-        window: App name or window title to target.
-        element: Editable element to find — matches against name or role.
-        text: Text to set as the field's content.
-    """
-    result = _atspi_call({
-        "op": "set_text",
-        "app": window,
-        "element": element,
-        "text": text,
-    })
-
-    if result.get("error"):
-        raise ToolError(result["error"])
-
-    if result.get("found") and result.get("set"):
-        el = result.get("element", {})
-        return f"Set text on {el.get('role', '?')}: \"{el.get('name', element)}\""
-
-    raise ToolError(f"Could not set text on element '{element}'.")
-
-
-# ---------------------------------------------------------------------------
-# Public MCP tools — Raw input (fallback for non-accessible apps)
-# ---------------------------------------------------------------------------
-
-
-def send_keys(keys: str, window: str | None = None) -> str:
-    """Send keyboard input using ydotool (Wayland-native).
-
-    Use this as a fallback when AT-SPI set_text/interact aren't available
-    (games, Wine apps, Electron apps without a11y).
-
-    Args:
-        keys: Text to type.
-        window: Optional window to activate first.
-    """
+def _send_keys(keys: str, window: str | None = None) -> str:
+    """Send keyboard input using ydotool (Wayland-native)."""
     sock = _ensure_ydotoold()
 
     if window:
@@ -690,21 +567,8 @@ def send_keys(keys: str, window: str | None = None) -> str:
     return f"Typed {len(keys)} characters{target}"
 
 
-def send_key(key: str, window: str | None = None) -> str:
-    """Send a key press/release using ydotool key codes.
-
-    Use for special keys, shortcuts, and combos. Key codes follow Linux
-    input event codes (KEY_* from linux/input-event-codes.h).
-
-    Common: 1=ESC, 14=Backspace, 15=Tab, 28=Enter, 29=LCtrl, 42=LShift,
-    56=LAlt, 57=Space, 100=RAlt, 125=Super.
-
-    Combos use colons: "29:42:46" = Ctrl+Shift+C
-
-    Args:
-        key: Key code(s), colon-separated for combos.
-        window: Optional window to activate first.
-    """
+def _send_key(key: str, window: str | None = None) -> str:
+    """Send a key press/release using ydotool key codes."""
     sock = _ensure_ydotoold()
 
     if window:
@@ -722,24 +586,14 @@ def send_key(key: str, window: str | None = None) -> str:
     return f"Sent key {key}{target}"
 
 
-def send_mouse(
+def _send_mouse(
     action: str,
     x: int,
     y: int,
     button: str = "left",
     window: str | None = None,
 ) -> str:
-    """Send mouse input using ydotool (Wayland-native).
-
-    Use as a fallback when AT-SPI interact isn't available.
-
-    Args:
-        action: 'click', 'move', 'doubleclick', or 'rightclick'.
-        x: Absolute X screen coordinate.
-        y: Absolute Y screen coordinate.
-        button: 'left', 'right', or 'middle'.
-        window: Optional window to activate first.
-    """
+    """Send mouse input using ydotool (Wayland-native)."""
     sock = _ensure_ydotoold()
 
     if window:
@@ -772,3 +626,110 @@ def send_mouse(
 
     target = f" on '{window}'" if window else ""
     return f"Mouse {action} at ({x}, {y}){target}"
+
+
+# ---------------------------------------------------------------------------
+# Public MCP tools — Accessibility (kept as-is)
+# ---------------------------------------------------------------------------
+
+
+def interact(
+    window: str,
+    element: str,
+    action: str = "Press",
+) -> str:
+    """Perform an action on a UI element via AT-SPI accessibility API."""
+    result = _atspi_call({
+        "op": "do_action",
+        "app": window,
+        "element": element,
+        "action": action,
+    })
+
+    if result.get("error"):
+        raise ToolError(result["error"])
+
+    if result.get("found") and result.get("did_action"):
+        el = result.get("element", {})
+        return f"Performed '{action}' on {el.get('role', '?')}: \"{el.get('name', element)}\""
+
+    raise ToolError(
+        f"Action '{action}' failed on element '{element}'. "
+        "Use manage_windows(action='inspect') to check available elements and actions."
+    )
+
+
+def set_text(window: str, element: str, text: str) -> str:
+    """Set text content of an editable field via AT-SPI."""
+    result = _atspi_call({
+        "op": "set_text",
+        "app": window,
+        "element": element,
+        "text": text,
+    })
+
+    if result.get("error"):
+        raise ToolError(result["error"])
+
+    if result.get("found") and result.get("set"):
+        el = result.get("element", {})
+        return f"Set text on {el.get('role', '?')}: \"{el.get('name', element)}\""
+
+    raise ToolError(f"Could not set text on element '{element}'.")
+
+
+# ---------------------------------------------------------------------------
+# Public MCP tools — Dispatchers
+# ---------------------------------------------------------------------------
+
+
+def screenshot(target: Literal["desktop", "window"] = "desktop", window: str | None = None) -> Image:
+    """Capture the desktop or a specific window as a compressed JPEG."""
+    if target == "window":
+        if not window:
+            raise ToolError("'window' is required for target='window'.")
+        return _screenshot_window(window)
+    return _screenshot_desktop()
+
+
+def manage_windows(
+    action: Literal["list", "activate", "inspect"],
+    window: str | None = None,
+    depth: int = 6,
+) -> str:
+    """List, activate, or inspect windows via KWin/AT-SPI."""
+    if action == "list":
+        return _list_windows()
+    if not window:
+        raise ToolError(f"'window' is required for action='{action}'.")
+    if action == "activate":
+        return _activate_window(window)
+    if action == "inspect":
+        return _inspect_window(window, depth)
+    raise ToolError(f"Unknown action '{action}'.")
+
+
+def send_input(
+    mode: Literal["type", "key", "mouse"],
+    keys: str | None = None,
+    key: str | None = None,
+    action: str | None = None,
+    x: int | None = None,
+    y: int | None = None,
+    button: str = "left",
+    window: str | None = None,
+) -> str:
+    """Send keyboard or mouse input via ydotool (Wayland-native fallback)."""
+    if mode == "type":
+        if not keys:
+            raise ToolError("'keys' is required for mode='type'.")
+        return _send_keys(keys, window)
+    if mode == "key":
+        if not key:
+            raise ToolError("'key' is required for mode='key'.")
+        return _send_key(key, window)
+    if mode == "mouse":
+        if x is None or y is None:
+            raise ToolError("'x' and 'y' are required for mode='mouse'.")
+        return _send_mouse(action or "click", x, y, button, window)
+    raise ToolError(f"Unknown mode '{mode}'.")

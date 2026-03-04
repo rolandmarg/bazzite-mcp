@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 def _extract_content(soup: BeautifulSoup) -> str | None:
     """Extract main content with multiple fallback selectors."""
-    # mkdocs-material selectors (most likely for docs.bazzite.gg)
     selectors = [
         ("article", {}),
         (None, {"class_": "md-content"}),
@@ -29,10 +28,9 @@ def _extract_content(soup: BeautifulSoup) -> str | None:
         el = soup.find(tag, **attrs) if tag else soup.find(**attrs)
         if el and isinstance(el, Tag):
             text = el.get_text(separator="\n", strip=True)
-            if len(text) > 50:  # skip near-empty matches
+            if len(text) > 50:
                 return text
 
-    # Last resort: extract body minus nav/header/footer
     body = soup.find("body")
     if body and isinstance(body, Tag):
         for unwanted in body.find_all(["nav", "header", "footer", "script", "style"]):
@@ -55,13 +53,11 @@ def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
             continue
         full_url = urljoin(base_url, href)
         parsed = urlparse(full_url)
-        # Only follow links within docs.bazzite.gg, skip anchors/external/CDN
         if (
             parsed.netloc == parsed_base.netloc
             and not parsed.fragment
             and not parsed.path.startswith("/cdn-cgi/")
         ):
-            # Normalize: strip query params, ensure trailing slash for dirs
             clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
             if not clean.endswith("/") and "." not in parsed.path.split("/")[-1]:
                 clean += "/"
@@ -83,7 +79,7 @@ async def _ensure_fresh_docs_cache(
         return cache, ""
 
     logger.info("Docs cache %s; triggering auto-refresh", reason)
-    report = await refresh_docs_cache(ctx)
+    report = await _refresh_docs_cache(ctx)
     refreshed_cache = DocsCache()
     if refreshed_cache.page_count() == 0:
         return refreshed_cache, (
@@ -97,12 +93,8 @@ async def _ensure_fresh_docs_cache(
     )
 
 
-async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
-    """Search cached Bazzite documentation using full-text search.
-
-    Searches page titles, content, and sections with synonym expansion.
-    Auto-refreshes cache when empty or stale.
-    """
+async def _query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
+    """Search cached Bazzite documentation using full-text search."""
     cache = DocsCache()
     cache, refresh_note = await _ensure_fresh_docs_cache(cache, ctx)
 
@@ -126,7 +118,7 @@ async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
     return "\n\n---\n\n".join(parts) + refresh_note
 
 
-async def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
+async def _bazzite_changelog(version: str | None = None, count: int = 5) -> str:
     """Get Bazzite release changelog from cache or GitHub API."""
     cfg = load_config()
     cache = DocsCache()
@@ -157,7 +149,7 @@ async def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
     return "\n\n".join(parts)
 
 
-def install_policy(app_type: str) -> str:
+def _install_policy(app_type: str) -> str:
     """Explain recommended install method by app type."""
     policies = {
         "gui": (
@@ -194,13 +186,8 @@ def install_policy(app_type: str) -> str:
     return policies[app_type]
 
 
-async def refresh_docs_cache(ctx: Context | None = None) -> str:
-    """Crawl docs.bazzite.gg recursively and refresh the local cache.
-
-    Discovers all pages by following internal links starting from the homepage.
-    Also fetches recent changelogs from GitHub releases.
-    Uses multiple CSS selector fallbacks for robust content extraction.
-    """
+async def _refresh_docs_cache(ctx: Context | None = None) -> str:
+    """Crawl docs.bazzite.gg recursively and refresh the local cache."""
     cfg = load_config()
     cache = DocsCache()
     logger.info("Starting docs cache refresh (max_pages=%s)", cfg.crawl_max_pages)
@@ -335,3 +322,32 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
     )
     report += f"\nSkipped {len(visited) - fetched} pages (no content or errors)."
     return report
+
+
+# --- Dispatcher ---
+
+from typing import Literal
+
+
+async def docs(
+    action: Literal["search", "changelog", "policy", "refresh"],
+    query: str | None = None,
+    version: str | None = None,
+    count: int = 5,
+    app_type: str | None = None,
+    ctx: Context | None = None,
+) -> str:
+    """Search docs, get changelogs, explain install policy, or refresh docs cache."""
+    if action == "search":
+        if not query:
+            raise ToolError("'query' is required for action='search'.")
+        return await _query_bazzite_docs(query, ctx)
+    if action == "changelog":
+        return await _bazzite_changelog(version, count)
+    if action == "policy":
+        if not app_type:
+            raise ToolError("'app_type' is required for action='policy'.")
+        return _install_policy(app_type)
+    if action == "refresh":
+        return await _refresh_docs_cache(ctx)
+    raise ToolError(f"Unknown action '{action}'.")

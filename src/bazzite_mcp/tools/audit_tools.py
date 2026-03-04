@@ -1,17 +1,15 @@
+from typing import Literal
+
 from bazzite_mcp.audit import AuditLog
-from bazzite_mcp.runner import run_audited
+from bazzite_mcp.runner import ToolError, run_audited
 
 
-def audit_log_query(
+def _audit_log_query(
     tool: str | None = None,
     search: str | None = None,
     limit: int = 20,
 ) -> str:
-    """Query the audit log of actions performed by the MCP server.
-
-    Use this to review what mutations the server has made, when, and whether
-    rollback commands are available. Use keyword search to find specific actions.
-    """
+    """Query the audit log of actions performed by the MCP server."""
     log = AuditLog()
     entries = log.query(tool=tool, search=search, limit=limit)
     if not entries:
@@ -27,12 +25,8 @@ def audit_log_query(
     return "\n\n".join(parts)
 
 
-def rollback_action(action_id: int) -> str:
-    """Execute rollback command for a specific audit entry.
-
-    Reverses a previous mutation by running its stored rollback command.
-    The rollback itself is also audit-logged.
-    """
+def _rollback_action(action_id: int) -> str:
+    """Execute rollback command for a specific audit entry."""
     log = AuditLog()
     rollback_cmd = log.get_rollback(action_id)
     if not rollback_cmd:
@@ -40,7 +34,7 @@ def rollback_action(action_id: int) -> str:
 
     result = run_audited(
         rollback_cmd,
-        tool="rollback_action",
+        tool="audit",
         args={"action_id": action_id, "rollback_cmd": rollback_cmd},
     )
     output = f"Rollback command: {rollback_cmd}\n"
@@ -49,3 +43,20 @@ def rollback_action(action_id: int) -> str:
     else:
         output += f"Failed (exit {result.returncode}): {result.stderr}"
     return output
+
+
+def audit(
+    action: Literal["query", "rollback"],
+    action_id: int | None = None,
+    tool: str | None = None,
+    search: str | None = None,
+    limit: int = 20,
+) -> str:
+    """Query audit log or rollback a previous action."""
+    if action == "query":
+        return _audit_log_query(tool=tool, search=search, limit=limit)
+    if action == "rollback":
+        if action_id is None:
+            raise ToolError("'action_id' is required for action='rollback'.")
+        return _rollback_action(action_id)
+    raise ToolError(f"Unknown action '{action}'.")

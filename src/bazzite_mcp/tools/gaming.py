@@ -55,7 +55,7 @@ def _list_acf_files(steamapps_dir: str) -> list[str]:
         return []
 
 
-def steam_library(name_filter: str | None = None) -> str:
+def _steam_library(name_filter: str | None = None) -> str:
     """List installed Steam games with app ID and install size."""
     root = _find_steam_root()
     if not root:
@@ -325,11 +325,8 @@ def _format_reports(
     return "\n\n".join(parts) if parts else f"No data available for app {app_id}."
 
 
-async def game_reports(app_id: int) -> str:
-    """Fetch compatibility and optimization hints for a Steam game.
-
-    Uses ProtonDB summary data and PCGamingWiki structured settings data.
-    """
+async def _game_reports(app_id: int) -> str:
+    """Fetch compatibility and optimization hints for a Steam game."""
     cached = _get_cached_reports(app_id)
     if cached:
         return _format_reports(
@@ -462,35 +459,36 @@ def _write_steam_launch_options(app_id: int, options: str) -> str:
     return config_path
 
 
-def game_settings(
-    action: Literal["get", "set"],
+def _game_settings_get(app_id: int) -> str:
+    """Read per-game settings for MangoHud and Steam launch options."""
+    global_path = _mangohud_config_path()
+    game_path = _mangohud_config_path(app_id)
+    combined = _read_mangohud_config(global_path)
+    combined.update(_read_mangohud_config(game_path))
+    launch = _read_steam_launch_options(app_id)
+
+    parts = [f"## Game Settings - App {app_id}"]
+    if combined:
+        parts.append("### MangoHud Config")
+        for key, value in combined.items():
+            parts.append(f"  {key}={value}" if value else f"  {key}")
+    else:
+        parts.append("No MangoHud config found (global or per-game).")
+
+    if launch:
+        parts.append(f"### Steam Launch Options\n  `{launch}`")
+
+    return "\n".join(parts)
+
+
+def _game_settings_set(
     app_id: int,
     mangohud: dict[str, str] | None = None,
     launch_options: str | None = None,
 ) -> str:
-    """Read or write per-game settings for MangoHud and Steam launch options."""
-    if action == "get":
-        global_path = _mangohud_config_path()
-        game_path = _mangohud_config_path(app_id)
-        combined = _read_mangohud_config(global_path)
-        combined.update(_read_mangohud_config(game_path))
-        launch = _read_steam_launch_options(app_id)
-
-        parts = [f"## Game Settings - App {app_id}"]
-        if combined:
-            parts.append("### MangoHud Config")
-            for key, value in combined.items():
-                parts.append(f"  {key}={value}" if value else f"  {key}")
-        else:
-            parts.append("No MangoHud config found (global or per-game).")
-
-        if launch:
-            parts.append(f"### Steam Launch Options\n  `{launch}`")
-
-        return "\n".join(parts)
-
+    """Write per-game settings for MangoHud and Steam launch options."""
     if not mangohud and not launch_options:
-        raise ToolError("set action requires at least one of: mangohud, launch_options")
+        raise ToolError("At least one of 'mangohud' or 'launch_options' is required.")
 
     parts = [f"## Applied Settings - App {app_id}"]
 
@@ -505,14 +503,14 @@ def game_settings(
             with AuditLog() as log:
                 rollback = f"cp {backup} {game_path}" if backup else f"rm {game_path}"
                 log.record(
-                    tool="game_settings",
+                    tool="gaming",
                     command=f"write MangoHud config {game_path}",
                     args=json.dumps({"app_id": app_id, "mangohud": mangohud}),
                     result="success",
                     rollback=rollback,
                 )
         except Exception as exc:
-            logger.error("Audit failed for game_settings MangoHud update: %s", exc)
+            logger.error("Audit failed for gaming MangoHud update: %s", exc)
 
         parts.append("### MangoHud")
         for key, value in mangohud.items():
@@ -527,7 +525,7 @@ def game_settings(
         try:
             with AuditLog() as log:
                 log.record(
-                    tool="game_settings",
+                    tool="gaming",
                     command=f"write Steam launch options for {app_id}",
                     args=json.dumps(
                         {"app_id": app_id, "launch_options": launch_options}
@@ -536,7 +534,7 @@ def game_settings(
                 )
         except Exception as exc:
             logger.error(
-                "Audit failed for game_settings launch options update: %s", exc
+                "Audit failed for gaming launch options update: %s", exc
             )
 
         parts.append(f"### Steam launch options\n  `{launch_options}`")
@@ -544,3 +542,27 @@ def game_settings(
         parts.append("  Note: restart Steam for launch option changes to take effect.")
 
     return "\n".join(parts)
+
+
+# --- Dispatcher ---
+
+
+async def gaming(
+    action: Literal["library", "reports", "settings_get", "settings_set"],
+    app_id: int | None = None,
+    name_filter: str | None = None,
+    mangohud: dict[str, str] | None = None,
+    launch_options: str | None = None,
+) -> str:
+    """Steam library, ProtonDB/PCGamingWiki reports, and per-game settings."""
+    if action == "library":
+        return _steam_library(name_filter)
+    if not app_id:
+        raise ToolError(f"'app_id' is required for action='{action}'.")
+    if action == "reports":
+        return await _game_reports(app_id)
+    if action == "settings_get":
+        return _game_settings_get(app_id)
+    if action == "settings_set":
+        return _game_settings_set(app_id, mangohud, launch_options)
+    raise ToolError(f"Unknown action '{action}'.")

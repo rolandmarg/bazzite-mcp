@@ -18,7 +18,7 @@ DISTROBOX_IMAGES = {
 }
 
 
-def create_distrobox(name: str, image: str | None = None) -> str:
+def _create_distrobox(name: str, image: str | None = None) -> str:
     """Create a new distrobox container."""
     if image and image in DISTROBOX_IMAGES:
         image = DISTROBOX_IMAGES[image]
@@ -29,7 +29,7 @@ def create_distrobox(name: str, image: str | None = None) -> str:
     simage = shlex.quote(image)
     result = run_audited(
         f"distrobox create --name {sname} --image {simage} --yes",
-        tool="create_distrobox",
+        tool="manage_distrobox",
         args={"name": name, "image": image},
         rollback=f"distrobox rm --force {sname}",
     )
@@ -38,7 +38,7 @@ def create_distrobox(name: str, image: str | None = None) -> str:
     return f"Container '{name}' created with image '{image}'.\nEnter with: distrobox enter {name}"
 
 
-def manage_distrobox(name: str, action: Literal["enter", "stop", "remove"]) -> str:
+def _distrobox_ctrl(name: str, action: str) -> str:
     """Manage a distrobox container (enter, stop, or remove)."""
     sname = shlex.quote(name)
     if action == "enter":
@@ -67,7 +67,7 @@ def manage_distrobox(name: str, action: Literal["enter", "stop", "remove"]) -> s
     return result.stdout
 
 
-def list_distroboxes() -> str:
+def _list_distroboxes() -> str:
     """List existing distrobox containers with status."""
     result = run_command("distrobox list")
     if result.returncode != 0:
@@ -75,12 +75,8 @@ def list_distroboxes() -> str:
     return result.stdout
 
 
-def exec_in_distrobox(name: str, command: str) -> str:
-    """Run a command inside a specific distrobox container.
-
-    Use this to install packages, run builds, or execute tools inside a distrobox.
-    The command runs inside the container, not on the host.
-    """
+def _exec_in_distrobox(name: str, command: str) -> str:
+    """Run a command inside a specific distrobox container."""
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -88,7 +84,7 @@ def exec_in_distrobox(name: str, command: str) -> str:
     safe_cmd = shlex.join(parts)
     result = run_audited(
         f"distrobox enter {shlex.quote(name)} -- {safe_cmd}",
-        tool="exec_in_distrobox",
+        tool="manage_distrobox",
         args={"name": name, "command": command},
     )
     output = result.stdout
@@ -97,11 +93,11 @@ def exec_in_distrobox(name: str, command: str) -> str:
     return output
 
 
-def export_distrobox_app(name: str, app: str) -> str:
+def _export_distrobox_app(name: str, app: str) -> str:
     """Export a GUI app from distrobox to host menu."""
     result = run_audited(
         f"distrobox enter {shlex.quote(name)} -- distrobox-export --app {shlex.quote(app)}",
-        tool="export_distrobox_app",
+        tool="manage_distrobox",
         args={"name": name, "app": app},
     )
     if result.returncode != 0:
@@ -109,16 +105,39 @@ def export_distrobox_app(name: str, app: str) -> str:
     return f"Exported '{app}' from container '{name}' to host application menu."
 
 
+def manage_distrobox(
+    action: Literal["create", "list", "enter", "stop", "remove", "exec", "export"],
+    name: str | None = None,
+    image: str | None = None,
+    command: str | None = None,
+    app: str | None = None,
+) -> str:
+    """Manage distrobox containers: create, list, enter, stop, remove, exec, or export apps."""
+    if action == "list":
+        return _list_distroboxes()
+    if not name:
+        raise ToolError(f"'name' is required for action='{action}'.")
+    if action == "create":
+        return _create_distrobox(name, image)
+    if action in ("enter", "stop", "remove"):
+        return _distrobox_ctrl(name, action)
+    if action == "exec":
+        if not command:
+            raise ToolError("'command' is required for action='exec'.")
+        return _exec_in_distrobox(name, command)
+    if action == "export":
+        if not app:
+            raise ToolError("'app' is required for action='export'.")
+        return _export_distrobox_app(name, app)
+    raise ToolError(f"Unknown action '{action}'.")
+
+
 def manage_quadlet(
     action: Literal["list", "create", "start", "stop", "status", "remove"],
     name: str | None = None,
     image: str | None = None,
 ) -> str:
-    """Manage Quadlet units for persistent containerized services.
-
-    Quadlet combines systemd + podman for declarative container services.
-    Use 'list' to see existing services, 'create' to make a new one.
-    """
+    """Manage Quadlet units for persistent containerized services."""
     if action == "list":
         result = run_command(
             "systemctl --user list-units --type=service 'podman-*' --no-pager 2>/dev/null"
@@ -243,17 +262,11 @@ def manage_podman(
     image: str = "",
     command: str = "",
 ) -> str:
-    """Run podman container operations.
-
-    Use 'ps' to list running containers, 'images' to list images.
-    Use 'run' with an image, 'stop'/'rm' with a container name/ID.
-    Use 'logs'/'inspect' with a container name/ID.
-    """
+    """Run podman container operations with dangerous flag blocking."""
     BLOCKED_FLAGS = ("--privileged", "--pid=host", "--net=host", "-v /:/")
     parts: list[str] = ["podman", action]
 
     if action in ("run", "pull") and image:
-        # Block dangerous flags
         for flag in BLOCKED_FLAGS:
             if flag in image:
                 raise ToolError(f"Blocked: '{flag}' is not allowed for safety.")
@@ -270,7 +283,7 @@ def manage_podman(
             raise ToolError("Error: 'command' is required for podman exec.")
         parts.extend(shlex.quote(p) for p in exec_parts)
     elif action in ("ps", "images"):
-        pass  # No extra args needed
+        pass
     elif action == "run" and not image:
         raise ToolError("Error: 'image' is required for podman run.")
     elif action == "exec" and not command:
@@ -290,33 +303,3 @@ def manage_podman(
     if result.returncode != 0:
         raise ToolError(f"Error: {result.stderr}")
     return result.stdout
-
-
-def manage_waydroid(action: Literal["setup", "status", "start", "stop"]) -> str:
-    """Manage Waydroid for running Android apps."""
-    if action == "setup":
-        return "Run: ujust setup-waydroid\n\nThis sets up Waydroid with Google Play support."
-
-    if action in ("status", "start", "stop"):
-        if action == "start":
-            result = run_audited(
-                "waydroid session start",
-                tool="manage_waydroid",
-                args={"action": action},
-                rollback="waydroid session stop",
-            )
-        elif action == "stop":
-            result = run_audited(
-                "waydroid session stop",
-                tool="manage_waydroid",
-                args={"action": action},
-            )
-        else:
-            result = run_command("waydroid status")
-        if result.returncode != 0:
-            raise ToolError(f"Error: {result.stderr}")
-        return result.stdout
-
-    raise ToolError(
-        f"Unknown action '{action}'. Supported: setup, status, start, stop."
-    )

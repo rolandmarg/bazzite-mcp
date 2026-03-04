@@ -3,14 +3,14 @@
 from bazzite_mcp import __version__
 from bazzite_mcp.cache.docs_cache import DocsCache
 from bazzite_mcp.config import load_config
-from bazzite_mcp.tools.docs import install_policy
+from bazzite_mcp.tools.docs import _install_policy
 from bazzite_mcp.tools.packages import INSTALL_POLICY
-from bazzite_mcp.tools.system import system_info
+from bazzite_mcp.tools.system import _system_info_basic
 
 
 def get_system_overview() -> str:
     """Current system info snapshot."""
-    return system_info()
+    return _system_info_basic()
 
 
 def get_install_hierarchy() -> str:
@@ -21,7 +21,7 @@ def get_install_hierarchy() -> str:
         "General order: ujust > flatpak > brew > distrobox/quadlet > AppImage > rpm-ostree\n",
     ]
     for tier in tiers:
-        parts.append(f"## {tier}\n{install_policy(tier)}\n")
+        parts.append(f"## {tier}\n{_install_policy(tier)}\n")
     return "\n".join(parts)
 
 
@@ -34,7 +34,7 @@ def get_docs_index() -> str:
     """Index of all cached documentation pages."""
     cache = DocsCache()
     if cache.page_count() == 0:
-        return "Docs cache is empty. Call refresh_docs_cache() to populate."
+        return "Docs cache is empty. Call docs(action='refresh') to populate."
 
     rows = cache._conn.execute(
         "SELECT url, title, section FROM pages ORDER BY section, title"

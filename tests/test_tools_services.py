@@ -4,10 +4,11 @@ import pytest
 
 from bazzite_mcp.runner import CommandResult, ToolError
 from bazzite_mcp.tools.services import (
+    _network_status,
+    _service_status,
     manage_firewall,
+    manage_network,
     manage_service,
-    network_status,
-    service_status,
 )
 
 
@@ -16,14 +17,14 @@ def test_service_status(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(
         returncode=0, stdout="active (running)", stderr=""
     )
-    result = service_status("NetworkManager")
+    result = _service_status("NetworkManager")
     assert "active" in result
 
 
 @patch("bazzite_mcp.tools.services.run_command")
 def test_network_status(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="eth0: connected", stderr="")
-    result = network_status()
+    result = _network_status()
     assert "connected" in result
 
 
@@ -67,8 +68,22 @@ def test_manage_service_disable(mock_audited: MagicMock) -> None:
     assert "enable" in kwargs.get("rollback", "")
 
 
+@patch("bazzite_mcp.tools.services.run_command")
+def test_manage_service_status_action(mock_run: MagicMock) -> None:
+    mock_run.return_value = MagicMock(returncode=0, stdout="active (running)", stderr="")
+    result = manage_service("bluetooth.service", "status")
+    assert "active" in result
+
+
+@patch("bazzite_mcp.tools.services.run_command")
+def test_manage_service_list_action(mock_run: MagicMock) -> None:
+    mock_run.return_value = MagicMock(returncode=0, stdout="sshd.service enabled", stderr="")
+    result = manage_service("ignored", "list", state="enabled")
+    assert "sshd" in result
+
+
 def test_manage_service_invalid_action() -> None:
-    with pytest.raises(ToolError, match="Unknown action"):
+    with pytest.raises(ToolError, match="destroy"):
         manage_service("bluetooth.service", "destroy")  # pyright: ignore[reportArgumentType]
 
 
@@ -122,3 +137,13 @@ def test_manage_firewall_rollback_inverse_mapping(mock_audited: MagicMock) -> No
     manage_firewall("remove-service", service="http")
     _, kwargs = mock_audited.call_args_list[2]
     assert "add-service=http" in kwargs["rollback"]
+
+
+# --- manage_network dispatcher tests ---
+
+
+@patch("bazzite_mcp.tools.services.run_command")
+def test_manage_network_status(mock_run: MagicMock) -> None:
+    mock_run.return_value = MagicMock(returncode=0, stdout="eth0: connected", stderr="")
+    result = manage_network("status")
+    assert "connected" in result

@@ -6,7 +6,7 @@ from typing import Literal
 from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
-def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
+def _set_theme(mode: str) -> str:
     """Switch between light, dark, or auto color scheme (GNOME only)."""
     schemes = {
         "dark": "prefer-dark",
@@ -19,7 +19,7 @@ def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
     scheme = schemes[mode]
     result = run_audited(
         f"gsettings set org.gnome.desktop.interface color-scheme '{scheme}'",
-        tool="set_theme",
+        tool="quick_setting",
         args={"mode": mode},
         rollback=f"gsettings set org.gnome.desktop.interface color-scheme 'default'",
     )
@@ -28,7 +28,7 @@ def set_theme(mode: Literal["dark", "light", "auto"]) -> str:
     return f"Theme set to {mode} (color-scheme: {scheme})"
 
 
-def set_audio_output(device: str | None = None) -> str:
+def _set_audio_output(device: str | None = None) -> str:
     """Switch audio output device, or list sinks when device is omitted."""
     if device is None:
         result = run_command("pactl list sinks short")
@@ -36,7 +36,7 @@ def set_audio_output(device: str | None = None) -> str:
 
     result = run_audited(
         f"pactl set-default-sink {shlex.quote(device)}",
-        tool="set_audio_output",
+        tool="quick_setting",
         args={"device": device},
     )
     if result.returncode != 0:
@@ -49,7 +49,7 @@ def _is_kde() -> bool:
     return "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
 
 
-def get_display_config() -> str:
+def _get_display_config() -> str:
     """Query current display setup."""
     if _is_kde():
         result = run_command("kscreen-doctor -o")
@@ -67,7 +67,7 @@ def get_display_config() -> str:
     return "No display tool available"
 
 
-def set_display_config(
+def _set_display_config(
     output: str,
     resolution: str | None = None,
     refresh: str | None = None,
@@ -82,7 +82,7 @@ def set_display_config(
     if scale:
         result = run_audited(
             f"gsettings set org.gnome.desktop.interface text-scaling-factor {shlex.quote(scale)}",
-            tool="set_display_config",
+            tool="display_config",
             args={"output": output, "scale": scale},
         )
         if result.returncode != 0:
@@ -97,7 +97,7 @@ def set_display_config(
     if resolution or refresh:
         result = run_audited(
             cmd,
-            tool="set_display_config",
+            tool="display_config",
             args={"output": output, "resolution": resolution, "refresh": refresh},
         )
         if result.returncode != 0:
@@ -108,7 +108,7 @@ def set_display_config(
                 fallback += f" --rate {shlex.quote(refresh)}"
             result = run_audited(
                 fallback,
-                tool="set_display_config",
+                tool="display_config",
                 args={
                     "output": output,
                     "resolution": resolution,
@@ -133,13 +133,10 @@ def _set_display_config_kde(
     scale: str | None,
 ) -> str:
     """Apply display config changes via kscreen-doctor (KDE Wayland)."""
-    # kscreen-doctor uses output index or name, e.g. "output.2.mode.28"
-    # First resolve the output index from kscreen-doctor
     probe = run_command("kscreen-doctor -o")
     if probe.returncode != 0:
         raise ToolError(f"kscreen-doctor failed: {probe.stderr}")
 
-    # Find the output index for the requested output name
     output_idx = None
     for line in probe.stdout.splitlines():
         if f" {output} " in line or line.strip().endswith(output):
@@ -174,7 +171,7 @@ def _set_display_config_kde(
     cmd = "kscreen-doctor " + " ".join(changes)
     result = run_audited(
         cmd,
-        tool="set_display_config",
+        tool="display_config",
         args={"output": output, "resolution": resolution, "refresh": refresh, "scale": scale, "via": "kscreen-doctor"},
     )
     if result.returncode != 0:
@@ -186,14 +183,13 @@ def _set_display_config_kde(
     )
 
 
-def set_power_profile(
-    profile: Literal["performance", "balanced", "power-saver"],
+def _set_power_profile(
+    profile: str,
 ) -> str:
     """Switch power profile between performance, balanced, or power-saver."""
-
     result = run_audited(
         f"powerprofilesctl set {profile}",
-        tool="set_power_profile",
+        tool="quick_setting",
         args={"profile": profile},
     )
     if result.returncode != 0:
@@ -201,7 +197,7 @@ def set_power_profile(
     return f"Power profile set to: {profile}"
 
 
-def get_settings(schema: str, key: str) -> str:
+def _get_settings(schema: str, key: str) -> str:
     """Read a gsettings value."""
     result = run_command(f"gsettings get {shlex.quote(schema)} {shlex.quote(key)}")
     if result.returncode != 0:
@@ -209,13 +205,71 @@ def get_settings(schema: str, key: str) -> str:
     return result.stdout
 
 
-def set_settings(schema: str, key: str, value: str) -> str:
+def _set_settings(schema: str, key: str, value: str) -> str:
     """Write a gsettings value."""
     result = run_audited(
         f"gsettings set {shlex.quote(schema)} {shlex.quote(key)} {shlex.quote(value)}",
-        tool="set_settings",
+        tool="gsettings",
         args={"schema": schema, "key": key, "value": value},
     )
     if result.returncode != 0:
         raise ToolError(f"Error setting {schema} {key}: {result.stderr}")
     return f"Set {schema} {key} = {value}"
+
+
+# --- Dispatchers ---
+
+
+def quick_setting(
+    setting: Literal["theme", "audio", "power"],
+    mode: Literal["dark", "light", "auto"] | None = None,
+    device: str | None = None,
+    profile: Literal["performance", "balanced", "power-saver"] | None = None,
+) -> str:
+    """Switch theme, audio output, or power profile."""
+    if setting == "theme":
+        if not mode:
+            raise ToolError("'mode' is required for setting='theme'.")
+        return _set_theme(mode)
+    if setting == "audio":
+        return _set_audio_output(device)
+    if setting == "power":
+        if not profile:
+            raise ToolError("'profile' is required for setting='power'.")
+        return _set_power_profile(profile)
+    raise ToolError(f"Unknown setting '{setting}'.")
+
+
+def display_config(
+    action: Literal["get", "set"],
+    output: str | None = None,
+    resolution: str | None = None,
+    refresh: str | None = None,
+    scale: str | None = None,
+) -> str:
+    """Query or change display resolution, refresh rate, or scaling."""
+    if action == "get":
+        return _get_display_config()
+    if action == "set":
+        if not output:
+            raise ToolError("'output' is required for action='set'.")
+        return _set_display_config(output, resolution, refresh, scale)
+    raise ToolError(f"Unknown action '{action}'.")
+
+
+def gsettings(
+    action: Literal["get", "set"],
+    schema: str | None = None,
+    key: str | None = None,
+    value: str | None = None,
+) -> str:
+    """Read or write a gsettings value."""
+    if not schema or not key:
+        raise ToolError("'schema' and 'key' are required.")
+    if action == "get":
+        return _get_settings(schema, key)
+    if action == "set":
+        if value is None:
+            raise ToolError("'value' is required for action='set'.")
+        return _set_settings(schema, key, value)
+    raise ToolError(f"Unknown action '{action}'.")

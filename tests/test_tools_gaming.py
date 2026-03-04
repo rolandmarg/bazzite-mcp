@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from bazzite_mcp.tools.gaming import game_reports, game_settings, steam_library
+import pytest
+
+from bazzite_mcp.runner import ToolError
+from bazzite_mcp.tools.gaming import (
+    _game_reports,
+    _game_settings_get,
+    _game_settings_set,
+    _steam_library,
+    gaming,
+)
 
 
 LIBRARY_FOLDERS_VDF = """"libraryfolders"
@@ -63,7 +72,7 @@ def test_steam_library_lists_games(mock_list_acf, mock_read_vdf, mock_root) -> N
     ]
     mock_list_acf.return_value = ["appmanifest_1091500.acf"]
 
-    result = steam_library()
+    result = _steam_library()
     assert "Cyberpunk 2077" in result
     assert "1091500" in result
 
@@ -81,7 +90,7 @@ def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
     ]
     mock_list_acf.return_value = ["appmanifest_1091500.acf"]
 
-    result = steam_library(name_filter="cyber")
+    result = _steam_library(name_filter="cyber")
     assert "Cyberpunk 2077" in result
 
     mock_read_vdf.side_effect = [
@@ -90,7 +99,7 @@ def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
     ]
     mock_list_acf.return_value = ["appmanifest_1091500.acf"]
 
-    result = steam_library(name_filter="halflife")
+    result = _steam_library(name_filter="halflife")
     assert "No games found" in result or "0 games" in result.lower()
 
 
@@ -98,7 +107,7 @@ def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
 def test_steam_library_no_steam(mock_root) -> None:
     mock_root.return_value = None
 
-    result = steam_library()
+    result = _steam_library()
     assert "not found" in result.lower() or "not installed" in result.lower()
 
 
@@ -113,7 +122,7 @@ def test_game_reports_fetches_and_formats(
     mock_fetch_summary.return_value = PROTONDB_SUMMARY
     mock_fetch_pcgw.return_value = PCGW_DATA
 
-    result = asyncio.run(game_reports(app_id=1091500))
+    result = asyncio.run(_game_reports(app_id=1091500))
     assert "gold" in result.lower()
     assert "pcgamingwiki" in result.lower()
     assert "FSR" in result
@@ -128,7 +137,7 @@ def test_game_reports_uses_cache(mock_cache_get) -> None:
         "pcgamingwiki_data": PCGW_DATA,
     }
 
-    result = asyncio.run(game_reports(app_id=1091500))
+    result = asyncio.run(_game_reports(app_id=1091500))
     assert "gold" in result.lower()
     assert "cached" in result.lower()
     assert "pcgamingwiki" in result.lower()
@@ -143,7 +152,7 @@ def test_game_settings_get(mock_read_launch_options, mock_read) -> None:
     ]
     mock_read_launch_options.return_value = "gamescope -- %command%"
 
-    result = game_settings(action="get", app_id=1091500)
+    result = _game_settings_get(app_id=1091500)
     assert "fps_limit" in result
     assert "60" in result
     assert "gpu_stats" in result
@@ -157,8 +166,7 @@ def test_game_settings_get(mock_read_launch_options, mock_read) -> None:
 def test_game_settings_set_mangohud(mock_backup, mock_read, mock_write, mock_audit) -> None:
     mock_read.return_value = {}
 
-    result = game_settings(
-        action="set",
+    result = _game_settings_set(
         app_id=1091500,
         mangohud={"fps_limit": "60", "gpu_stats": "1"},
     )
@@ -170,10 +178,22 @@ def test_game_settings_set_mangohud(mock_backup, mock_read, mock_write, mock_aud
 @patch("bazzite_mcp.tools.gaming.AuditLog")
 @patch("bazzite_mcp.tools.gaming._write_steam_launch_options")
 def test_game_settings_set_launch_options(mock_write, mock_audit) -> None:
-    result = game_settings(
-        action="set",
+    result = _game_settings_set(
         app_id=1091500,
         launch_options="gamescope -w 1920 -h 1080 -F fsr -- mangohud %command%",
     )
     assert "launch options" in result.lower()
     mock_write.assert_called_once()
+
+
+# --- Dispatcher tests ---
+
+
+def test_gaming_dispatcher_reports_requires_app_id() -> None:
+    with pytest.raises(ToolError, match="app_id"):
+        asyncio.run(gaming(action="reports"))
+
+
+def test_gaming_dispatcher_settings_get_requires_app_id() -> None:
+    with pytest.raises(ToolError, match="app_id"):
+        asyncio.run(gaming(action="settings_get"))

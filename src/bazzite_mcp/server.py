@@ -7,162 +7,91 @@ from bazzite_mcp.resources import (
     get_server_info,
     get_system_overview,
 )
-from bazzite_mcp.tools.audit_tools import audit_log_query, rollback_action
+from bazzite_mcp.tools.audit_tools import audit
 from bazzite_mcp.tools.containers import (
-    create_distrobox,
-    exec_in_distrobox,
-    export_distrobox_app,
-    list_distroboxes,
     manage_distrobox,
     manage_podman,
     manage_quadlet,
-    manage_waydroid,
 )
 from bazzite_mcp.tools.desktop import (
-    activate_window,
-    inspect_window,
     interact,
-    list_windows,
+    manage_windows,
     screenshot,
-    screenshot_window,
-    send_key,
-    send_keys,
-    send_mouse,
+    send_input,
     set_text,
 )
-from bazzite_mcp.tools.docs import (
-    bazzite_changelog,
-    install_policy,
-    query_bazzite_docs,
-    refresh_docs_cache,
-)
-from bazzite_mcp.tools.gaming import game_reports, game_settings, steam_library
-from bazzite_mcp.tools.packages import (
-    install_package,
-    list_packages,
-    remove_package,
-    search_package,
-    update_packages,
-)
+from bazzite_mcp.tools.docs import docs
+from bazzite_mcp.tools.gaming import gaming
+from bazzite_mcp.tools.packages import packages
 from bazzite_mcp.tools.services import (
-    list_services,
-    manage_connection,
     manage_firewall,
+    manage_network,
     manage_service,
-    manage_tailscale,
-    network_status,
-    service_status,
 )
 from bazzite_mcp.tools.settings import (
-    get_display_config,
-    get_settings,
-    set_audio_output,
-    set_display_config,
-    set_power_profile,
-    set_settings,
-    set_theme,
+    display_config,
+    gsettings,
+    quick_setting,
 )
 from bazzite_mcp.tools.system import (
-    disk_usage,
-    hardware_info,
-    journal_logs,
-    process_list,
+    manage_snapshots,
+    storage_diagnostics,
+    system_doctor,
     system_info,
-    update_status,
 )
-from bazzite_mcp.tools.ujust import ujust_list, ujust_run, ujust_show
+from bazzite_mcp.tools.ujust import ujust
 
 
 mcp = FastMCP(
     "bazzite",
     instructions=(
-        "Bazzite OS management server. Key principles:\n"
-        "1. Always check ujust first for system operations (ujust_list, ujust_show, ujust_run)\n"
-        "2. Follow the 6-tier install hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree\n"
-        "3. Use query_bazzite_docs to search cached documentation\n"
-        "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
-        "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
-        "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing\n"
-        "7. For gaming: use steam_library to find games, game_reports for community optimization data, "
-        "game_settings to apply MangoHud/launch options. Use hardware_info + game_reports to make "
-        "hardware-aware recommendations. Existing manage_service covers GameMode."
+        "Bazzite OS management server. "
+        "Check ujust first for system operations. "
+        "Follow 6-tier install hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree. "
+        "Every mutation is audit-logged with rollback support."
     ),
 )
 
-# ujust (Tier 1)
-mcp.tool(ujust_run)
-mcp.tool(ujust_list)
-mcp.tool(ujust_show)
+# --- Tools (23 total) ---
 
-# Package management
-mcp.tool(install_package)
-mcp.tool(remove_package)
-mcp.tool(search_package)
-mcp.tool(list_packages)
-mcp.tool(update_packages)
+# Core
+mcp.tool(ujust)
+mcp.tool(packages)
+mcp.tool(docs)
+mcp.tool(audit)
 
-# System settings
-mcp.tool(set_theme)
-mcp.tool(set_audio_output)
-mcp.tool(get_display_config)
-mcp.tool(set_display_config)
-mcp.tool(set_power_profile)
-mcp.tool(get_settings)
-mcp.tool(set_settings)
+# System
+mcp.tool(system_info)
+mcp.tool(storage_diagnostics)
+mcp.tool(system_doctor)
+mcp.tool(manage_snapshots)
+
+# Settings
+mcp.tool(quick_setting)
+mcp.tool(display_config)
+mcp.tool(gsettings)
+
+# Desktop
 mcp.tool(screenshot)
-mcp.tool(screenshot_window)
-mcp.tool(list_windows)
-mcp.tool(activate_window)
-mcp.tool(inspect_window)
+mcp.tool(manage_windows)
 mcp.tool(interact)
 mcp.tool(set_text)
-mcp.tool(send_keys)
-mcp.tool(send_key)
-mcp.tool(send_mouse)
+mcp.tool(send_input)
 
-# Services and networking
+# Services & networking
 mcp.tool(manage_service)
-mcp.tool(service_status)
-mcp.tool(list_services)
-mcp.tool(network_status)
-mcp.tool(manage_connection)
 mcp.tool(manage_firewall)
-mcp.tool(manage_tailscale)
+mcp.tool(manage_network)
 
 # Containers
-mcp.tool(create_distrobox)
 mcp.tool(manage_distrobox)
-mcp.tool(list_distroboxes)
-mcp.tool(exec_in_distrobox)
-mcp.tool(export_distrobox_app)
 mcp.tool(manage_quadlet)
 mcp.tool(manage_podman)
-mcp.tool(manage_waydroid)
-
-# System info
-mcp.tool(system_info)
-mcp.tool(disk_usage)
-mcp.tool(update_status)
-mcp.tool(journal_logs)
-mcp.tool(hardware_info)
-mcp.tool(process_list)
-
-# Knowledge and docs
-mcp.tool(query_bazzite_docs)
-mcp.tool(bazzite_changelog)
-mcp.tool(install_policy)
-mcp.tool(refresh_docs_cache)
-
-# Audit
-mcp.tool(audit_log_query)
-mcp.tool(rollback_action)
 
 # Gaming
-mcp.tool(steam_library)
-mcp.tool(game_reports)
-mcp.tool(game_settings)
+mcp.tool(gaming)
 
-# MCP Resources — read-only context
+# --- MCP Resources ---
 mcp.resource(
     "bazzite://system/overview",
     description="Current OS, kernel, desktop, and hardware summary",
@@ -190,19 +119,19 @@ mcp.resource(
 )(get_server_info)
 
 
-# MCP Prompts — reusable workflow templates
+# --- MCP Prompts ---
 @mcp.prompt()
 def troubleshoot_system(symptom: str) -> str:
-    """Gather diagnostics for a system issue. Collects logs, hardware info, and service status."""
+    """Gather diagnostics for a system issue."""
     return (
         f"The user is experiencing: {symptom}\n\n"
         "Diagnostic steps:\n"
-        "1. Run system_info to get OS/kernel/desktop\n"
-        "2. Run journal_logs with relevant unit or priority='err' to find errors\n"
-        "3. Run hardware_info if it might be hardware-related\n"
-        "4. Run service_status for relevant services\n"
-        "5. Search docs with query_bazzite_docs or semantic_search_docs\n"
-        "6. Check update_status for pending OS updates\n\n"
+        "1. Run system_info(detail='basic') to get OS/kernel/desktop\n"
+        "2. Use bash: journalctl -n 50 -p err to find errors\n"
+        "3. Run system_info(detail='full') if hardware-related\n"
+        "4. Run manage_service(action='status', name=<service>) for relevant services\n"
+        "5. Search docs with docs(action='search', query=<topic>)\n"
+        "6. Use bash: rpm-ostree status for pending OS updates\n\n"
         "Provide a summary of findings and recommended fixes."
     )
 
@@ -212,11 +141,11 @@ def install_app(app_name: str) -> str:
     """Walk through the 6-tier install hierarchy to find and install an app."""
     return (
         f"Install '{app_name}' following Bazzite's 6-tier hierarchy:\n\n"
-        "1. First, run search_package to check ujust, flatpak, and brew\n"
-        "2. If found in ujust (Tier 1), use ujust_run\n"
-        "3. If found in flatpak (Tier 2), install via install_package with method='flatpak'\n"
-        "4. If found in brew (Tier 3), install via install_package with method='brew'\n"
-        "5. If not found, consider creating a distrobox container\n"
+        "1. First, run packages(action='search', package=<name>) to check ujust, flatpak, and brew\n"
+        "2. If found in ujust (Tier 1), use ujust(action='run', command=<recipe>)\n"
+        "3. If found in flatpak (Tier 2), install via packages(action='install', method='flatpak')\n"
+        "4. If found in brew (Tier 3), install via packages(action='install', method='brew')\n"
+        "5. If not found, consider manage_distrobox(action='create')\n"
         "6. rpm-ostree is the absolute last resort\n\n"
         "Always explain which tier you chose and why."
     )
@@ -227,9 +156,9 @@ def setup_dev_environment(language: str) -> str:
     """Set up a development environment using distrobox."""
     return (
         f"Set up a {language} development environment:\n\n"
-        "1. Create a distrobox with create_distrobox (ubuntu or fedora image)\n"
-        "2. Use exec_in_distrobox to install the language toolchain\n"
-        "3. Use export_distrobox_app to export any GUI tools to the host menu\n"
+        "1. Create a distrobox with manage_distrobox(action='create', name=<name>, image=<distro>)\n"
+        "2. Use manage_distrobox(action='exec', name=<name>, command=<install cmd>) to install the toolchain\n"
+        "3. Use manage_distrobox(action='export', name=<name>, app=<gui-tool>) to export GUI tools\n"
         "4. Explain how to enter the container for interactive work\n\n"
         "This keeps the immutable host clean while giving full package access."
     )
@@ -240,11 +169,11 @@ def diagnose_service(service_name: str) -> str:
     """Debug a failing or misbehaving systemd service."""
     return (
         f"Diagnose the systemd service '{service_name}':\n\n"
-        "1. Run service_status to see current state\n"
-        "2. Run journal_logs with unit='{service_name}' to see recent logs\n"
-        "3. Check if the service is enabled with list_services(state='enabled')\n"
-        "4. If failed, check journal_logs with priority='err'\n"
-        "5. Search bazzite docs for known issues with this service\n\n"
+        "1. Run manage_service(action='status', name='{service_name}')\n"
+        "2. Use bash: journalctl -u {service_name} -n 50 to see recent logs\n"
+        "3. Run manage_service(action='list', state='enabled') to check if enabled\n"
+        "4. Use bash: journalctl -p err -n 20 if failed\n"
+        "5. Search bazzite docs with docs(action='search', query=<topic>)\n\n"
         "Provide diagnosis and recommended fix."
     )
 
@@ -254,15 +183,15 @@ def optimize_game(game_name: str) -> str:
     """Optimize a game's settings based on hardware and community data."""
     return (
         f"Optimize '{game_name}' for this system:\n\n"
-        "1. Run steam_library to find the game and get its app ID\n"
-        "2. Run hardware_info to get GPU, CPU, and RAM details\n"
-        "3. Run game_reports with the app ID to get ProtonDB community data\n"
+        "1. Run gaming(action='library', name_filter=<game>) to find the app ID\n"
+        "2. Run system_info(detail='full') to get GPU, CPU, and RAM details\n"
+        "3. Run gaming(action='reports', app_id=<id>) for ProtonDB community data\n"
         "4. Based on hardware + community reports, determine:\n"
         "   - Best Proton version to use\n"
         "   - Gamescope launch flags (resolution, scaler, FPS limit)\n"
         "   - MangoHud monitoring settings\n"
         "   - Whether to enable GameMode\n"
-        "5. Apply settings with game_settings tool\n"
+        "5. Apply settings with gaming(action='settings_set', app_id=<id>, ...)\n"
         "6. Enable GameMode if recommended: manage_service(name='gamemoded', action='enable', user=True)\n\n"
         "Explain each recommendation and why it suits this hardware."
     )

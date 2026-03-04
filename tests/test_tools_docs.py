@@ -1,23 +1,27 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from bs4 import BeautifulSoup
 
+from bazzite_mcp.runner import ToolError
 from bazzite_mcp.tools.docs import (
     _discover_doc_links,
     _extract_content,
-    install_policy,
-    query_bazzite_docs,
+    _install_policy,
+    _query_bazzite_docs,
+    docs,
 )
 
 
 def test_install_policy_gui_app() -> None:
-    result = install_policy("gui")
+    result = _install_policy("gui")
     assert "flatpak" in result.lower()
 
 
 def test_install_policy_cli_tool() -> None:
-    result = install_policy("cli")
+    result = _install_policy("cli")
     assert "brew" in result.lower() or "homebrew" in result.lower()
 
 
@@ -179,10 +183,10 @@ def test_discover_doc_links_filters_cdn_cgi(mock_cfg: MagicMock) -> None:
     assert len(links) == 0
 
 
-# --- query_bazzite_docs tests (async) ---
+# --- _query_bazzite_docs tests (async) ---
 
 
-@patch("bazzite_mcp.tools.docs.refresh_docs_cache", new_callable=AsyncMock)
+@patch("bazzite_mcp.tools.docs._refresh_docs_cache", new_callable=AsyncMock)
 @patch("bazzite_mcp.tools.docs.DocsCache")
 def test_query_bazzite_docs_auto_refreshes_when_empty(
     mock_cache_cls: MagicMock,
@@ -205,7 +209,7 @@ def test_query_bazzite_docs_auto_refreshes_when_empty(
     mock_cache_cls.side_effect = [empty_cache, refreshed_cache]
     mock_refresh.return_value = "Refreshed docs cache: 1 pages crawled (max 100)."
 
-    result = asyncio.run(query_bazzite_docs("installation"))
+    result = asyncio.run(_query_bazzite_docs("installation"))
     assert "Installation Guide" in result
     assert "auto-refreshed docs cache" in result
     mock_refresh.assert_called_once()
@@ -229,7 +233,7 @@ def test_query_bazzite_docs_with_results(
     mock_cache.is_stale.return_value = False
     mock_cache_cls.return_value = mock_cache
 
-    result = asyncio.run(query_bazzite_docs("installation"))
+    result = asyncio.run(_query_bazzite_docs("installation"))
     assert "Installation Guide" in result
     assert "General" in result
     assert "Source:" in result
@@ -245,6 +249,14 @@ def test_query_bazzite_docs_no_results(
     mock_cache.search.return_value = []
     mock_cache_cls.return_value = mock_cache
 
-    result = asyncio.run(query_bazzite_docs("xyznonexistent"))
+    result = asyncio.run(_query_bazzite_docs("xyznonexistent"))
     assert "No results" in result
     assert "xyznonexistent" in result
+
+
+# --- Dispatcher tests ---
+
+
+def test_docs_dispatcher_search_requires_query() -> None:
+    with pytest.raises(ToolError, match="query"):
+        asyncio.run(docs(action="search"))

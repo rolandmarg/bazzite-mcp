@@ -1,8 +1,12 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from bazzite_mcp.runner import ToolError
 from bazzite_mcp.tools.containers import (
-    create_distrobox,
-    list_distroboxes,
+    _create_distrobox,
+    _list_distroboxes,
+    manage_distrobox,
     manage_podman,
     manage_quadlet,
 )
@@ -13,7 +17,7 @@ def test_list_distroboxes(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(
         returncode=0, stdout="ubuntu-dev | running", stderr=""
     )
-    result = list_distroboxes()
+    result = _list_distroboxes()
     assert "ubuntu" in result.lower()
 
 
@@ -22,7 +26,7 @@ def test_create_distrobox(mock_audited: MagicMock) -> None:
     mock_audited.return_value = MagicMock(
         returncode=0, stdout="Container created", stderr=""
     )
-    result = create_distrobox("test-box", image="ubuntu:24.04")
+    result = _create_distrobox("test-box", image="ubuntu:24.04")
     assert "created" in result.lower() or "Container" in result
 
 
@@ -73,3 +77,23 @@ def test_manage_quadlet_remove_deletes_unit(
     result = manage_quadlet("remove", name="demo")
     assert not unit_file.exists()
     assert "Removed Quadlet unit" in result
+
+
+# --- Dispatcher tests ---
+
+
+@patch("bazzite_mcp.tools.containers.run_command")
+def test_manage_distrobox_list(mock_run: MagicMock) -> None:
+    mock_run.return_value = MagicMock(returncode=0, stdout="ubuntu-dev | running", stderr="")
+    result = manage_distrobox("list")
+    assert "ubuntu" in result.lower()
+
+
+def test_manage_distrobox_create_requires_name() -> None:
+    with pytest.raises(ToolError, match="name"):
+        manage_distrobox("create")
+
+
+def test_manage_distrobox_exec_requires_command() -> None:
+    with pytest.raises(ToolError, match="command"):
+        manage_distrobox("exec", name="box1")

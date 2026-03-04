@@ -36,14 +36,11 @@ def _run_search_command(
         )
 
 
-def install_package(
+def _install_package(
     package: str,
-    method: Literal["flatpak", "brew", "rpm-ostree", "ujust"] | None = None,
+    method: str | None = None,
 ) -> str:
-    """Install package following Bazzite's 6-tier hierarchy, or use an explicit method.
-
-    When no method is specified, searches ujust > flatpak > brew automatically.
-    """
+    """Install package following Bazzite's 6-tier hierarchy, or use an explicit method."""
     if method:
         return _install_with_method(package, method)
 
@@ -61,7 +58,7 @@ def install_package(
         return (
             f"Found ujust command(s) for '{package}':\n"
             + "\n".join(f"  ujust {cmd.strip()}" for cmd in commands)
-            + f"\n\nRun with: ujust_run tool\n\n{INSTALL_POLICY}"
+            + f"\n\nRun with: ujust tool (action='run')\n\n{INSTALL_POLICY}"
         )
 
     flatpak_check = _run_search_command(f"flatpak search {pkg} 2>/dev/null")
@@ -107,7 +104,7 @@ def _install_with_method(package: str, method: str) -> str:
 
     result = run_audited(
         method_commands[method],
-        tool="install_package",
+        tool="packages",
         args={"package": package, "method": method},
         rollback=rollback_commands.get(method),
     )
@@ -119,8 +116,8 @@ def _install_with_method(package: str, method: str) -> str:
     return f"Installed '{package}' via {method}:\n{output}"
 
 
-def remove_package(
-    package: str, method: Literal["flatpak", "brew", "rpm-ostree"]
+def _remove_package(
+    package: str, method: str
 ) -> str:
     """Remove package via its original install method."""
     pkg = shlex.quote(package)
@@ -141,7 +138,7 @@ def remove_package(
 
     result = run_audited(
         method_commands[method],
-        tool="remove_package",
+        tool="packages",
         args={"package": package, "method": method},
         rollback=reinstall_commands.get(method),
     )
@@ -152,7 +149,7 @@ def remove_package(
     return result.stdout
 
 
-def search_package(package: str) -> str:
+def _search_package(package: str) -> str:
     """Search package across ujust, flatpak, brew."""
     parts: list[str] = []
     timed_out: list[str] = []
@@ -199,8 +196,8 @@ def search_package(package: str) -> str:
     return "\n\n".join(parts) + timeout_note + f"\n\n{INSTALL_POLICY}"
 
 
-def list_packages(
-    source: Literal["flatpak", "brew", "rpm-ostree"] | None = None,
+def _list_packages(
+    source: str | None = None,
 ) -> str:
     """List installed packages by source, or all sources if omitted."""
     parts: list[str] = []
@@ -236,23 +233,49 @@ def list_packages(
     return "\n\n".join(parts) if parts else "No packages found."
 
 
-def update_packages(source: Literal["system", "flatpak", "brew"] | None = None) -> str:
+def _update_packages(source: str | None = None) -> str:
     """Update packages by source, or run full system update if omitted."""
     if source in (None, "system"):
         result = run_audited(
-            "ujust update", tool="update_packages", args={"source": "system"}
+            "ujust update", tool="packages", args={"source": "system"}
         )
         return f"System update:\n{result.stdout}"
     if source == "flatpak":
         result = run_audited(
-            "flatpak update -y", tool="update_packages", args={"source": "flatpak"}
+            "flatpak update -y", tool="packages", args={"source": "flatpak"}
         )
         return f"Flatpak update:\n{result.stdout}"
     if source == "brew":
         result = run_audited(
-            "brew upgrade", tool="update_packages", args={"source": "brew"}
+            "brew upgrade", tool="packages", args={"source": "brew"}
         )
         return f"Brew update:\n{result.stdout}"
     raise ToolError(
         f"Unknown source '{source}'. Supported: flatpak, brew, system, all."
     )
+
+
+def packages(
+    action: Literal["install", "remove", "search", "list", "update"],
+    package: str | None = None,
+    method: Literal["flatpak", "brew", "rpm-ostree", "ujust"] | None = None,
+    source: Literal["system", "flatpak", "brew", "rpm-ostree"] | None = None,
+) -> str:
+    """Install, remove, search, list, or update packages following the 6-tier hierarchy."""
+    if action == "install":
+        if not package:
+            raise ToolError("'package' is required for action='install'.")
+        return _install_package(package, method)
+    if action == "remove":
+        if not package or not method:
+            raise ToolError("'package' and 'method' are required for action='remove'.")
+        return _remove_package(package, method)
+    if action == "search":
+        if not package:
+            raise ToolError("'package' is required for action='search'.")
+        return _search_package(package)
+    if action == "list":
+        return _list_packages(source)
+    if action == "update":
+        return _update_packages(source)
+    raise ToolError(f"Unknown action '{action}'.")

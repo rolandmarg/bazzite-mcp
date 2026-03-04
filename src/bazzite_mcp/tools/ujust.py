@@ -1,9 +1,10 @@
 import shlex
+from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 
-def ujust_list(filter: str | None = None) -> str:
+def _ujust_list(filter: str | None = None) -> str:
     """List available ujust commands, optionally filtered by keyword."""
     result = run_command("ujust --summary")
     if result.returncode != 0:
@@ -17,7 +18,7 @@ def ujust_list(filter: str | None = None) -> str:
     return "\n".join(lines) if lines else "No matching commands found."
 
 
-def ujust_show(command: str) -> str:
+def _ujust_show(command: str) -> str:
     """Show the source script of a ujust command before running it."""
     result = run_command(f"ujust --show {shlex.quote(command)}")
     if result.returncode != 0:
@@ -25,12 +26,8 @@ def ujust_show(command: str) -> str:
     return result.stdout
 
 
-def ujust_run(command: str) -> str:
-    """Execute a ujust command.
-
-    ujust is Bazzite's built-in command runner for system setup, configuration,
-    and maintenance. It is the first method to check for system operations.
-    """
+def _ujust_run(command: str) -> str:
+    """Execute a ujust command."""
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -57,12 +54,12 @@ def ujust_run(command: str) -> str:
     ):
         raise ToolError(
             f"'{recipe}' appears interactive. Pass an explicit non-interactive option "
-            "(for example: '<recipe> help') or inspect it with ujust_show first."
+            "(for example: '<recipe> help') or inspect it with action='show' first."
         )
 
     result = run_audited(
         f"ujust {shlex.join(parts)}",
-        tool="ujust_run",
+        tool="ujust",
         args={"command": command},
     )
     output = result.stdout
@@ -71,3 +68,22 @@ def ujust_run(command: str) -> str:
     if result.returncode != 0:
         raise ToolError(f"Command failed (exit {result.returncode}):\n{output}")
     return output
+
+
+def ujust(
+    action: Literal["run", "list", "show"],
+    command: str | None = None,
+    filter: str | None = None,
+) -> str:
+    """Run, list, or inspect ujust commands — Bazzite's built-in system setup tool."""
+    if action == "run":
+        if not command:
+            raise ToolError("'command' is required for action='run'.")
+        return _ujust_run(command)
+    if action == "show":
+        if not command:
+            raise ToolError("'command' is required for action='show'.")
+        return _ujust_show(command)
+    if action == "list":
+        return _ujust_list(filter)
+    raise ToolError(f"Unknown action '{action}'.")

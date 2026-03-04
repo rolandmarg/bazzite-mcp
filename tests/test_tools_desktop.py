@@ -1,9 +1,11 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fastmcp.utilities.types import Image
 
-from bazzite_mcp.runner import CommandResult
-from bazzite_mcp.tools.desktop import screenshot
+from bazzite_mcp.runner import CommandResult, ToolError
+from bazzite_mcp.tools.desktop import _screenshot_desktop, screenshot
 
 
 @patch("bazzite_mcp.tools.desktop.shutil.which")
@@ -11,7 +13,7 @@ from bazzite_mcp.tools.desktop import screenshot
 def test_screenshot_returns_image_with_jpeg(mock_run: MagicMock, mock_which: MagicMock) -> None:
     mock_which.return_value = "/usr/bin/spectacle"
     mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    result = screenshot()
+    result = _screenshot_desktop()
     assert isinstance(result, Image)
     assert result.path is not None
     assert str(result.path).endswith(".jpg")
@@ -23,7 +25,7 @@ def test_screenshot_returns_image_with_jpeg(mock_run: MagicMock, mock_which: Mag
 def test_screenshot_calls_spectacle_then_magick(mock_run: MagicMock, mock_which: MagicMock) -> None:
     mock_which.return_value = "/usr/bin/spectacle"
     mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    screenshot()
+    _screenshot_desktop()
     commands = [c[0][0] for c in mock_run.call_args_list]
     assert any("spectacle" in cmd for cmd in commands)
     assert any("magick" in cmd for cmd in commands)
@@ -33,7 +35,7 @@ def test_screenshot_calls_spectacle_then_magick(mock_run: MagicMock, mock_which:
 def test_screenshot_raises_when_spectacle_missing(mock_which: MagicMock) -> None:
     mock_which.return_value = None
     try:
-        screenshot()
+        _screenshot_desktop()
         assert False, "Should have raised"
     except Exception as e:
         assert "spectacle" in str(e).lower()
@@ -46,6 +48,14 @@ def test_screenshot_falls_back_to_png_without_magick(mock_run: MagicMock, mock_w
         return "/usr/bin/spectacle" if name == "spectacle" else None
     mock_which.side_effect = which_side_effect
     mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    result = screenshot()
+    result = _screenshot_desktop()
     assert isinstance(result, Image)
     assert str(result.path).endswith(".png")
+
+
+# --- Dispatcher tests ---
+
+
+def test_screenshot_dispatcher_window_requires_window() -> None:
+    with pytest.raises(ToolError, match="window"):
+        screenshot(target="window")
