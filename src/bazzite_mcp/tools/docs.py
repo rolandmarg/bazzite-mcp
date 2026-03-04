@@ -312,11 +312,11 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
     """
     cfg = load_config()
     cache = DocsCache()
-    cache.clear()
     logger.info("Starting docs cache refresh (max_pages=%s)", cfg.crawl_max_pages)
 
     fetched = 0
     errors: list[str] = []
+    staged_pages: list[dict[str, str]] = []
     visited: set[str] = set()
     to_visit: set[str] = {cfg.docs_base_url + "/"}
     max_pages = cfg.crawl_max_pages
@@ -383,11 +383,13 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
 
                 page = result.get("page")
                 if isinstance(page, dict):
-                    cache.store_page(
-                        url=str(page["url"]),
-                        title=str(page["title"]),
-                        content=str(page["content"]),
-                        section=str(page["section"]),
+                    staged_pages.append(
+                        {
+                            "url": str(page["url"]),
+                            "title": str(page["title"]),
+                            "content": str(page["content"]),
+                            "section": str(page["section"]),
+                        }
                     )
                     fetched += 1
                     if ctx:
@@ -419,9 +421,21 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
         errors.append(f"GitHub releases: {exc}")
         logger.warning("Failed to refresh changelogs: %s", exc)
 
-    # Generate embeddings if API key is available
-    embedded, embed_errors = await embed_pages(cache._conn)
-    errors.extend(embed_errors)
+    if staged_pages:
+        cache.clear()
+        for page in staged_pages:
+            cache.store_page(
+                url=page["url"],
+                title=page["title"],
+                content=page["content"],
+                section=page["section"],
+            )
+        embedded, embed_errors = await embed_pages(cache._conn)
+        errors.extend(embed_errors)
+    else:
+        embedded = 0
+        embed_errors = []
+        errors.append("No docs pages were fetched; existing cache was preserved.")
 
     report = f"Refreshed docs cache: {fetched} pages crawled (max {max_pages})."
     if embedded:

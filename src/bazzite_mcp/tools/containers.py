@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import Path
 from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
@@ -124,19 +125,33 @@ def manage_quadlet(
         )
         return result.stdout if result.stdout.strip() else "No Quadlet services found."
 
+    def service_name(unit: str) -> str:
+        return unit if unit.endswith(".service") else f"{unit}.service"
+
+    def unit_base(unit: str) -> str:
+        return unit[:-8] if unit.endswith(".service") else unit
+
     if action == "status" and name:
-        result = run_command(f"systemctl --user status {shlex.quote(name)} --no-pager")
+        result = run_command(
+            f"systemctl --user status {shlex.quote(service_name(name))} --no-pager"
+        )
         return result.stdout
 
     if action in ("start", "stop") and name:
-        result = run_command(f"systemctl --user {action} {shlex.quote(name)}")
+        result = run_audited(
+            f"systemctl --user {action} {shlex.quote(service_name(name))}",
+            tool="manage_quadlet",
+            args={"action": action, "name": name},
+        )
         if result.returncode != 0:
             raise ToolError(f"Error: {result.stderr}")
         return result.stdout
 
     if action == "create" and name and image:
-        quadlet_dir = "~/.config/containers/systemd"
-        run_command(f"mkdir -p {quadlet_dir}")
+        base_name = unit_base(name)
+        quadlet_dir = Path.home() / ".config" / "containers" / "systemd"
+        quadlet_dir.mkdir(parents=True, exist_ok=True)
+        unit_path = quadlet_dir / f"{base_name}.container"
         unit_content = f"""[Container]
 Image={image}
 PublishPort=
@@ -147,18 +162,86 @@ Restart=always
 [Install]
 WantedBy=default.target
 """
+        unit_path.write_text(unit_content, encoding="utf-8")
+
+        reload_result = run_audited(
+            "systemctl --user daemon-reload",
+            tool="manage_quadlet",
+            args={"action": "create", "name": name, "image": image},
+            rollback=f"rm -f {shlex.quote(str(unit_path))}",
+        )
+        if reload_result.returncode != 0:
+            raise ToolError(
+                f"Quadlet file created but daemon-reload failed: {reload_result.stderr}"
+            )
+
         return (
-            f"To create a Quadlet service, write this to {quadlet_dir}/{name}.container:\n\n"
-            f"{unit_content}\nThen run: systemctl --user daemon-reload && systemctl --user start {name}"
+            f"Created Quadlet unit: {unit_path}\n"
+            f"Start it with: systemctl --user start {service_name(name)}"
         )
 
-    raise ToolError("Usage: action='list|create|start|stop|status|remove', name=<service>, image=<image>")
+    if action == "remove" and name:
+        svc = service_name(name)
+        unit_path = (
+            Path.home()
+            / ".config"
+            / "containers"
+            / "systemd"
+            / f"{unit_base(name)}.container"
+        )
+
+        stop_result = run_audited(
+            f"systemctl --user stop {shlex.quote(svc)}",
+            tool="manage_quadlet",
+            args={"action": "remove-stop", "name": name},
+        )
+
+        disable_result = run_audited(
+            f"systemctl --user disable {shlex.quote(svc)}",
+            tool="manage_quadlet",
+            args={"action": "remove-disable", "name": name},
+        )
+
+        removed_file = False
+        if unit_path.exists():
+            unit_path.unlink()
+            removed_file = True
+
+        reload_result = run_audited(
+            "systemctl --user daemon-reload",
+            tool="manage_quadlet",
+            args={"action": "remove", "name": name},
+        )
+
+        if reload_result.returncode != 0:
+            raise ToolError(
+                f"Removed file but daemon-reload failed: {reload_result.stderr}"
+            )
+
+        notes: list[str] = []
+        if stop_result.returncode != 0:
+            notes.append(f"stop: {stop_result.stderr or stop_result.stdout}")
+        if disable_result.returncode != 0:
+            notes.append(f"disable: {disable_result.stderr or disable_result.stdout}")
+        if not removed_file:
+            notes.append(f"unit file not found: {unit_path}")
+
+        if notes:
+            return f"Processed Quadlet removal for {svc}.\n" + "\n".join(notes)
+        return f"Removed Quadlet unit {svc} and reloaded systemd user daemon."
+
+    raise ToolError(
+        "Usage: action='list|create|start|stop|status|remove', name=<service>, image=<image>"
+    )
 
 
 def manage_podman(
-    action: Literal["run", "stop", "rm", "pull", "ps", "images", "logs", "inspect", "exec"],
+    action: Literal[
+        "run", "stop", "rm", "pull", "ps", "images", "logs", "inspect", "exec"
+    ],
     container: str = "",
     image: str = "",
+    command: str = "",
 ) -> str:
     """Run podman container operations.
 
@@ -175,12 +258,25 @@ def manage_podman(
             if flag in image:
                 raise ToolError(f"Blocked: '{flag}' is not allowed for safety.")
         parts.append(shlex.quote(image))
-    elif action in ("stop", "rm", "logs", "inspect", "exec") and container:
+    elif action in ("stop", "rm", "logs", "inspect") and container:
         parts.append(shlex.quote(container))
+    elif action == "exec" and container and command:
+        parts.append(shlex.quote(container))
+        try:
+            exec_parts = shlex.split(command)
+        except ValueError:
+            raise ToolError("Invalid podman exec command syntax.")
+        if not exec_parts:
+            raise ToolError("Error: 'command' is required for podman exec.")
+        parts.extend(shlex.quote(p) for p in exec_parts)
     elif action in ("ps", "images"):
         pass  # No extra args needed
     elif action == "run" and not image:
         raise ToolError("Error: 'image' is required for podman run.")
+    elif action == "exec" and not command:
+        raise ToolError("Error: 'command' is required for podman exec.")
+    elif action == "exec" and not container:
+        raise ToolError("Error: 'container' is required for podman exec.")
 
     cmd = " ".join(parts)
     if action in ("run", "stop", "rm", "pull"):
@@ -221,4 +317,6 @@ def manage_waydroid(action: Literal["setup", "status", "start", "stop"]) -> str:
             raise ToolError(f"Error: {result.stderr}")
         return result.stdout
 
-    raise ToolError(f"Unknown action '{action}'. Supported: setup, status, start, stop.")
+    raise ToolError(
+        f"Unknown action '{action}'. Supported: setup, status, start, stop."
+    )

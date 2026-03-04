@@ -13,6 +13,20 @@ def _repo_local() -> str:
     return load_config().repo_local
 
 
+def _default_branch(repo: str) -> str:
+    qrepo = shlex.quote(repo)
+    head = run_command(f"git -C {qrepo} symbolic-ref --short refs/remotes/origin/HEAD")
+    if head.returncode == 0 and head.stdout.strip():
+        remote_ref = head.stdout.strip()
+        if "/" in remote_ref:
+            return remote_ref.split("/", 1)[1]
+
+    current = run_command(f"git -C {qrepo} branch --show-current")
+    if current.returncode == 0 and current.stdout.strip():
+        return current.stdout.strip()
+    return "main"
+
+
 def suggest_improvement(
     title: str,
     description: str,
@@ -62,42 +76,97 @@ def suggest_improvement(
 
 def contribute_fix(branch_name: str, description: str, files_changed: str) -> str:
     """Create branch, commit selected files, push, and open PR."""
-    repo = shlex.quote(_repo_local())
+    repo = _repo_local()
+    qrepo = shlex.quote(repo)
+    base_branch = _default_branch(repo)
+
+    current_branch_result = run_command(f"git -C {qrepo} branch --show-current")
+    current_branch = current_branch_result.stdout.strip() or base_branch
 
     create_branch = run_audited(
-        f"git -C {repo} checkout -b {shlex.quote(branch_name)}",
+        f"git -C {qrepo} checkout -b {shlex.quote(branch_name)}",
         tool="contribute_fix",
         args={"branch": branch_name, "description": description[:100]},
     )
     if create_branch.returncode != 0:
-        return f"Failed to create branch: {create_branch.stderr}"
+        if "already exists" in (create_branch.stderr or "").lower():
+            checkout_existing = run_audited(
+                f"git -C {qrepo} checkout {shlex.quote(branch_name)}",
+                tool="contribute_fix",
+                args={"action": "checkout-existing-branch", "branch": branch_name},
+            )
+            if checkout_existing.returncode != 0:
+                return (
+                    f"Failed to switch to existing branch: {checkout_existing.stderr}"
+                )
+        else:
+            return f"Failed to create branch: {create_branch.stderr}"
 
-    safe_files = " ".join(shlex.quote(f) for f in shlex.split(files_changed))
-    add_result = run_command(f"git -C {repo} add {safe_files}")
+    safe_files_list = shlex.split(files_changed)
+    if not safe_files_list:
+        run_audited(
+            f"git -C {qrepo} checkout {shlex.quote(current_branch)}",
+            tool="contribute_fix",
+            args={"action": "restore-branch", "branch": current_branch},
+        )
+        return "Failed to stage files: no files specified."
+
+    safe_files = " ".join(shlex.quote(f) for f in safe_files_list)
+    add_result = run_audited(
+        f"git -C {qrepo} add {safe_files}",
+        tool="contribute_fix",
+        args={"action": "git-add", "files": safe_files_list},
+    )
     if add_result.returncode != 0:
-        run_command(f"git -C {repo} checkout main")
+        run_audited(
+            f"git -C {qrepo} checkout {shlex.quote(current_branch)}",
+            tool="contribute_fix",
+            args={"action": "restore-branch", "branch": current_branch},
+        )
         return f"Failed to stage files: {add_result.stderr}"
 
-    commit = run_command(
-        f"git -C {repo} commit -m {shlex.quote(f'feat: {description[:72]}')}"
+    commit = run_audited(
+        f"git -C {qrepo} commit -m {shlex.quote(f'feat: {description[:72]}')}",
+        tool="contribute_fix",
+        args={"action": "git-commit", "branch": branch_name},
     )
     if commit.returncode != 0:
-        run_command(f"git -C {repo} checkout main")
+        run_audited(
+            f"git -C {qrepo} checkout {shlex.quote(current_branch)}",
+            tool="contribute_fix",
+            args={"action": "restore-branch", "branch": current_branch},
+        )
         return f"Failed to commit: {commit.stderr}"
 
-    push = run_command(f"git -C {repo} push -u origin {shlex.quote(branch_name)}")
+    push = run_audited(
+        f"git -C {qrepo} push -u origin {shlex.quote(branch_name)}",
+        tool="contribute_fix",
+        args={"action": "git-push", "branch": branch_name},
+    )
     if push.returncode != 0:
-        run_command(f"git -C {repo} checkout main")
+        run_audited(
+            f"git -C {qrepo} checkout {shlex.quote(current_branch)}",
+            tool="contribute_fix",
+            args={"action": "restore-branch", "branch": current_branch},
+        )
         return f"Failed to push: {push.stderr}"
 
     pr_cmd = (
         f"gh pr create --repo {shlex.quote(_repo_slug())} "
         f"--title {shlex.quote(f'feat: {description[:60]}')} "
         f"--body {shlex.quote('## Summary\n\n' + description)} "
-        "--base main"
+        f"--base {shlex.quote(base_branch)}"
     )
-    pr_result = run_command(pr_cmd)
-    run_command(f"git -C {repo} checkout main")
+    pr_result = run_audited(
+        pr_cmd,
+        tool="contribute_fix",
+        args={"action": "gh-pr-create", "branch": branch_name, "base": base_branch},
+    )
+    run_audited(
+        f"git -C {qrepo} checkout {shlex.quote(current_branch)}",
+        tool="contribute_fix",
+        args={"action": "restore-branch", "branch": current_branch},
+    )
 
     if pr_result.returncode != 0:
         return (
@@ -107,6 +176,7 @@ def contribute_fix(branch_name: str, description: str, files_changed: str) -> st
     return (
         f"PR created: {pr_result.stdout.strip()}\n\n"
         f"Branch: {branch_name}\n"
+        f"Base: {base_branch}\n"
         f"Description: {description}"
     )
 

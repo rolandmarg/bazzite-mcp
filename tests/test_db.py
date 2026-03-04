@@ -36,6 +36,16 @@ def test_ensure_cache_tables(tmp_path, monkeypatch) -> None:
     conn.close()
 
 
+def test_get_connection_enables_foreign_keys(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    db_path = get_db_path("fk.db")
+    conn = get_connection(db_path)
+    row = conn.execute("PRAGMA foreign_keys").fetchone()
+    conn.close()
+    assert row is not None
+    assert int(row[0]) == 1
+
+
 def test_migrates_embeddings_model_column_for_old_cache_schema(
     tmp_path, monkeypatch
 ) -> None:

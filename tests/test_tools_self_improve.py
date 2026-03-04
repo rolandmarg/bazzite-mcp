@@ -9,9 +9,9 @@ from bazzite_mcp.tools.self_improve import (
 )
 
 
-@patch("bazzite_mcp.tools.self_improve.run_command")
-def test_suggest_improvement_creates_issue(mock_run: MagicMock) -> None:
-    mock_run.return_value = MagicMock(
+@patch("bazzite_mcp.tools.self_improve.run_audited")
+def test_suggest_improvement_creates_issue(mock_audited: MagicMock) -> None:
+    mock_audited.return_value = MagicMock(
         returncode=0,
         stdout="https://github.com/rolandmarg/bazzite-mcp/issues/1",
         stderr="",
@@ -84,10 +84,12 @@ def test_contribute_fix_successful_pr(
     mock_local: MagicMock,
     mock_slug: MagicMock,
 ) -> None:
-    # run_audited handles branch creation
-    mock_audited.return_value = MagicMock(returncode=0, stdout="", stderr="")
-    # run_command handles add, commit, push, pr create, checkout main
     mock_run.side_effect = [
+        MagicMock(returncode=0, stdout="origin/main", stderr=""),
+        MagicMock(returncode=0, stdout="main", stderr=""),
+    ]
+    mock_audited.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),  # checkout -b
         MagicMock(returncode=0, stdout="", stderr=""),  # add
         MagicMock(returncode=0, stdout="", stderr=""),  # commit
         MagicMock(returncode=0, stdout="", stderr=""),  # push
@@ -96,13 +98,14 @@ def test_contribute_fix_successful_pr(
             stdout="https://github.com/rolandmarg/bazzite-mcp/pull/42",
             stderr="",
         ),  # pr create
-        MagicMock(returncode=0, stdout="", stderr=""),  # checkout main
+        MagicMock(returncode=0, stdout="", stderr=""),  # checkout current branch
     ]
     result = contribute_fix(
         "fix/audio", "Fix audio switching bug", "src/tools/audio.py"
     )
     assert "PR created" in result
     assert "https://github.com" in result
+    assert "Base: main" in result
 
 
 @patch(
@@ -117,11 +120,15 @@ def test_contribute_fix_branch_creation_failure(
     mock_local: MagicMock,
     mock_slug: MagicMock,
 ) -> None:
+    mock_run.side_effect = [
+        MagicMock(returncode=0, stdout="origin/main", stderr=""),
+        MagicMock(returncode=0, stdout="main", stderr=""),
+    ]
     mock_audited.return_value = MagicMock(
-        returncode=1, stdout="", stderr="branch already exists"
+        returncode=1, stdout="", stderr="permission denied"
     )
     result = contribute_fix(
         "fix/audio", "Fix audio switching bug", "src/tools/audio.py"
     )
     assert "Failed to create branch" in result
-    assert "already exists" in result
+    assert "permission denied" in result
