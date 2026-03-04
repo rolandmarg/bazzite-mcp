@@ -7,6 +7,7 @@ from bazzite_mcp.tools.docs import (
     _extract_content,
     install_policy,
     query_bazzite_docs,
+    semantic_search_docs,
 )
 
 
@@ -35,14 +36,20 @@ def test_extract_content_article_selector() -> None:
 
 
 def test_extract_content_md_content_class() -> None:
-    html = '<html><body><div class="md-content">B' + " text" * 20 + "</div></body></html>"
+    html = (
+        '<html><body><div class="md-content">B' + " text" * 20 + "</div></body></html>"
+    )
     result = _extract_content(_make_soup(html))
     assert result is not None
     assert "text" in result
 
 
 def test_extract_content_md_content_inner_class() -> None:
-    html = '<html><body><div class="md-content__inner">C' + " data" * 20 + "</div></body></html>"
+    html = (
+        '<html><body><div class="md-content__inner">C'
+        + " data" * 20
+        + "</div></body></html>"
+    )
     result = _extract_content(_make_soup(html))
     assert result is not None
     assert "data" in result
@@ -175,15 +182,33 @@ def test_discover_doc_links_filters_cdn_cgi(mock_cfg: MagicMock) -> None:
 # --- query_bazzite_docs tests ---
 
 
+@patch("bazzite_mcp.tools.docs.refresh_docs_cache")
 @patch("bazzite_mcp.tools.docs.DocsCache")
-def test_query_bazzite_docs_empty_cache(mock_cache_cls: MagicMock) -> None:
-    mock_cache = MagicMock()
-    mock_cache.page_count.return_value = 0
-    mock_cache_cls.return_value = mock_cache
+def test_query_bazzite_docs_auto_refreshes_when_empty(
+    mock_cache_cls: MagicMock,
+    mock_refresh: MagicMock,
+) -> None:
+    empty_cache = MagicMock()
+    empty_cache.page_count.return_value = 0
+
+    refreshed_cache = MagicMock()
+    refreshed_cache.page_count.return_value = 1
+    refreshed_cache.search.return_value = [
+        {
+            "title": "Installation Guide",
+            "section": "General",
+            "content": "Install steps" + " x" * 50,
+            "url": "https://docs.bazzite.gg/General/Installation_Guide/",
+        }
+    ]
+
+    mock_cache_cls.side_effect = [empty_cache, refreshed_cache]
+    mock_refresh.return_value = "Refreshed docs cache: 1 pages crawled (max 100)."
 
     result = query_bazzite_docs("installation")
-    assert "cache is empty" in result.lower()
-    assert "refresh_docs_cache" in result
+    assert "Installation Guide" in result
+    assert "auto-refreshed docs cache" in result
+    mock_refresh.assert_called_once()
 
 
 @patch("bazzite_mcp.tools.docs.DocsCache")
@@ -194,7 +219,8 @@ def test_query_bazzite_docs_with_results(mock_cache_cls: MagicMock) -> None:
         {
             "title": "Installation Guide",
             "section": "General",
-            "content": "Follow these steps to install Bazzite on your system." + " x" * 200,
+            "content": "Follow these steps to install Bazzite on your system."
+            + " x" * 200,
             "url": "https://docs.bazzite.gg/General/Installation_Guide/",
         }
     ]
@@ -211,9 +237,44 @@ def test_query_bazzite_docs_with_results(mock_cache_cls: MagicMock) -> None:
 def test_query_bazzite_docs_no_results(mock_cache_cls: MagicMock) -> None:
     mock_cache = MagicMock()
     mock_cache.page_count.return_value = 50
+    mock_cache.is_stale.return_value = False
     mock_cache.search.return_value = []
     mock_cache_cls.return_value = mock_cache
 
     result = query_bazzite_docs("xyznonexistent")
     assert "No results" in result
     assert "xyznonexistent" in result
+
+
+@patch("bazzite_mcp.tools.docs.semantic_search")
+@patch("bazzite_mcp.tools.docs.refresh_docs_cache")
+@patch("bazzite_mcp.tools.docs.DocsCache")
+def test_semantic_search_auto_refreshes_when_empty(
+    mock_cache_cls: MagicMock,
+    mock_refresh: MagicMock,
+    mock_semantic_search: MagicMock,
+) -> None:
+    empty_cache = MagicMock()
+    empty_cache.page_count.return_value = 0
+
+    refreshed_cache = MagicMock()
+    refreshed_cache.page_count.return_value = 10
+    refreshed_cache._conn = MagicMock()
+
+    mock_cache_cls.side_effect = [empty_cache, refreshed_cache]
+    mock_refresh.return_value = "Refreshed docs cache: 10 pages crawled (max 100)."
+    mock_semantic_search.return_value = [
+        {
+            "title": "Waydroid Setup",
+            "section": "android",
+            "url": "https://docs.bazzite.gg/Installing_and_Managing_Software/Waydroid/",
+            "content": "Use Waydroid to run Android apps.",
+            "score": 0.9231,
+        }
+    ]
+
+    result = semantic_search_docs("how to run android apps", limit=3)
+    assert "Waydroid Setup" in result
+    assert "score" in result
+    assert "auto-refreshed docs cache" in result
+    mock_refresh.assert_called_once()

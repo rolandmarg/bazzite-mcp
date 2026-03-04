@@ -22,6 +22,24 @@ BLOCKED_PATTERNS = [
         "Do NOT rebase to switch desktop environments. Backup and reinstall instead.",
     ),
     (r"\bdd\s+.*of=/dev/", "destructive disk write"),
+    # Shell injection vectors
+    (r"\beval\b", "eval is blocked for safety"),
+    (r"\bbash\s+-c\b", "bash -c is blocked for safety"),
+    (r"\bsh\s+-c\b", "sh -c is blocked for safety"),
+    (r"\|\s*bash\b", "piping to bash is blocked for safety"),
+    (r"\|\s*sh\b", "piping to sh is blocked for safety"),
+    (r"\bbase64\b.*\|\s*(bash|sh)\b", "base64 decode to shell is blocked"),
+    # Destructive system operations
+    (r"\bshred\b", "destructive file operation"),
+    (r"\bwipefs\b", "destructive disk operation"),
+    (r"\bsystemctl\s+(mask|unmask)\b", "masking services is blocked for safety"),
+    (r"\bchmod\s+[0-7]*777\b", "world-writable permissions are blocked"),
+    (r"\bchown\s+root\b", "changing ownership to root is blocked"),
+    # Fork bombs and resource exhaustion
+    (r":\(\)\s*\{", "fork bomb detected"),
+    (r"\bwhile\s+true\b.*\bdone\b", "infinite loop detected"),
+    # Privilege escalation via path
+    (r"/usr/s?bin/rm\b", "use rm without full path"),
 ]
 
 WARN_PATTERNS = [

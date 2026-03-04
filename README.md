@@ -160,9 +160,12 @@ Resources provide read-only context that agents can query without calling tools:
 | `bazzite://docs/index` | Index of all cached documentation pages |
 | `bazzite://server/info` | Server config and cache status |
 
-## Auto-Refresh (Optional)
+## On-Demand Refresh (Default)
 
-A systemd user timer can keep the docs cache fresh automatically:
+`query_bazzite_docs` and `semantic_search_docs` automatically refresh the docs cache
+when it is empty or stale. Default cache TTL is 12 hours.
+
+You can still pre-warm in the background with an optional systemd timer:
 
 ```bash
 cp contrib/systemd/bazzite-mcp-refresh.* ~/.config/systemd/user/
@@ -170,7 +173,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now bazzite-mcp-refresh.timer
 ```
 
-Manual refresh: call the `refresh_docs_cache` tool, or run directly:
+Manual refresh is still available via `refresh_docs_cache`, or directly:
 
 ```bash
 uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp.refresh
@@ -182,6 +185,18 @@ Set a Gemini API key (free) to enable meaning-based doc search:
 
 ```bash
 export GEMINI_API_KEY="your-key"  # Get free at https://aistudio.google.com/apikey
+```
+
+For frictionless setup across shells and systemd services, put it in:
+
+```bash
+~/.config/bazzite-mcp/env
+```
+
+Example:
+
+```bash
+GEMINI_API_KEY="your-key"
 ```
 
 Embeddings are generated during `refresh_docs_cache` and stored locally. Subsequent searches are fast local lookups. Without an API key, `semantic_search_docs` falls back to keyword search.
@@ -210,7 +225,7 @@ Optional config file at `~/.config/bazzite-mcp/config.toml`:
 
 ```toml
 repo_slug = "rolandmarg/bazzite-mcp"
-cache_ttl_days = 7
+cache_ttl_hours = 12
 crawl_max_pages = 100
 ```
 
@@ -220,8 +235,10 @@ Environment variable overrides:
 |----------|---------|-------------|
 | `BAZZITE_MCP_REPO` | `rolandmarg/bazzite-mcp` | GitHub repo slug for issues/PRs |
 | `BAZZITE_MCP_LOCAL` | Auto-detected from package path | Local repo path for source reading |
-| `BAZZITE_MCP_CACHE_TTL` | `7` | Cache TTL in days |
+| `BAZZITE_MCP_CACHE_TTL_HOURS` | `12` | Cache TTL in hours (preferred) |
+| `BAZZITE_MCP_CACHE_TTL` | `7` | Cache TTL in days (legacy fallback) |
 | `BAZZITE_MCP_CRAWL_MAX` | `100` | Max pages to crawl |
+| `BAZZITE_MCP_ENV_FILE` | `~/.config/bazzite-mcp/env` | Path to env file loaded at startup |
 
 ## Development
 

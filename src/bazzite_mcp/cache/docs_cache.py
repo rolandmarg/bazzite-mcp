@@ -1,7 +1,20 @@
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import datetime, timezone
 
 from bazzite_mcp.config import load_config
 from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
+
+
+def _sanitize_fts5_query(query: str) -> str:
+    """Sanitize a query for FTS5 MATCH to prevent syntax errors.
+
+    Extracts words and quotes each as a literal term, stripping FTS5
+    operators (OR, NOT, NEAR, *, etc.) that could cause crashes.
+    """
+    words = re.findall(r"\w+", query)
+    if not words:
+        return '""'
+    return " ".join(f'"{w}"' for w in words)
 
 
 class DocsCache:
@@ -25,11 +38,12 @@ class DocsCache:
         self._conn.commit()
 
     def search(self, query: str, limit: int = 10) -> list[dict]:
+        safe_query = _sanitize_fts5_query(query)
         rows = self._conn.execute(
             "SELECT p.url, p.title, p.content, p.section, p.fetched_at "
             "FROM pages p JOIN pages_fts f ON p.id = f.rowid "
             "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
-            (query, limit),
+            (safe_query, limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -45,7 +59,9 @@ class DocsCache:
         return [dict(row) for row in rows]
 
     def is_stale(self) -> bool:
-        row = self._conn.execute("SELECT MIN(fetched_at) AS oldest FROM pages").fetchone()
+        row = self._conn.execute(
+            "SELECT MIN(fetched_at) AS oldest FROM pages"
+        ).fetchone()
         if not row or not row["oldest"]:
             return True
 
@@ -55,7 +71,8 @@ class DocsCache:
         oldest = datetime.fromisoformat(oldest_raw)
         if oldest.tzinfo is None:
             oldest = oldest.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc) - oldest > timedelta(days=load_config().cache_ttl_days)
+        ttl_seconds = load_config().cache_ttl_seconds()
+        return (datetime.now(timezone.utc) - oldest).total_seconds() > ttl_seconds
 
     def clear(self) -> None:
         self._conn.execute("DELETE FROM embeddings")

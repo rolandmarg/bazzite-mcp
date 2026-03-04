@@ -66,7 +66,7 @@ def test_journal_logs_with_since(mock_run: MagicMock) -> None:
     )
     result = journal_logs(since="today")
     cmd = mock_run.call_args[0][0]
-    assert '--since "today"' in cmd
+    assert "--since today" in cmd
 
 
 @patch("bazzite_mcp.tools.system.run_command")
@@ -92,4 +92,4 @@ def test_journal_logs_all_filters_combined(mock_run: MagicMock) -> None:
     assert "-n 100" in cmd
     assert "-u nginx" in cmd
     assert "-p warning" in cmd
-    assert '--since "yesterday"' in cmd
+    assert "--since yesterday" in cmd

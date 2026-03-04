@@ -1,3 +1,5 @@
+import shlex
+
 from bazzite_mcp.runner import run_command
 
 
@@ -44,11 +46,11 @@ def journal_logs(
     """Query journalctl with optional filters."""
     cmd = f"journalctl --no-pager -n {lines}"
     if unit:
-        cmd += f" -u {unit}"
+        cmd += f" -u {shlex.quote(unit)}"
     if priority:
-        cmd += f" -p {priority}"
+        cmd += f" -p {shlex.quote(priority)}"
     if since:
-        cmd += f' --since "{since}"'
+        cmd += f" --since {shlex.quote(since)}"
 
     result = run_command(cmd)
     return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"

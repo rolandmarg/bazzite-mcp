@@ -1,3 +1,5 @@
+import shlex
+
 from bazzite_mcp.runner import run_audited, run_command
 
 
@@ -30,7 +32,7 @@ def set_audio_output(device: str | None = None) -> str:
         return f"Available audio outputs:\n{result.stdout}\n\nUse sink name or index to switch."
 
     result = run_audited(
-        f"pactl set-default-sink {device}",
+        f"pactl set-default-sink {shlex.quote(device)}",
         tool="set_audio_output",
         args={"device": device},
     )
@@ -54,20 +56,21 @@ def set_display_config(
     scale: str | None = None,
 ) -> str:
     """Change display resolution, refresh rate, or scaling."""
+    soutput = shlex.quote(output)
     if scale:
         result = run_audited(
-            f"gsettings set org.gnome.desktop.interface text-scaling-factor {scale}",
+            f"gsettings set org.gnome.desktop.interface text-scaling-factor {shlex.quote(scale)}",
             tool="set_display_config",
             args={"output": output, "scale": scale},
         )
         if result.returncode != 0:
             return f"Failed to set scale: {result.stderr}"
 
-    cmd = f"gnome-randr modify {output}"
+    cmd = f"gnome-randr modify {soutput}"
     if resolution:
-        cmd += f" --mode {resolution}"
+        cmd += f" --mode {shlex.quote(resolution)}"
     if refresh:
-        cmd += f" --rate {refresh}"
+        cmd += f" --rate {shlex.quote(refresh)}"
 
     if resolution or refresh:
         result = run_audited(
@@ -76,11 +79,11 @@ def set_display_config(
             args={"output": output, "resolution": resolution, "refresh": refresh},
         )
         if result.returncode != 0:
-            fallback = f"xrandr --output {output}"
+            fallback = f"xrandr --output {soutput}"
             if resolution:
-                fallback += f" --mode {resolution}"
+                fallback += f" --mode {shlex.quote(resolution)}"
             if refresh:
-                fallback += f" --rate {refresh}"
+                fallback += f" --rate {shlex.quote(refresh)}"
             result = run_audited(
                 fallback,
                 tool="set_display_config",
@@ -113,7 +116,7 @@ def set_power_profile(profile: str) -> str:
 
 def get_settings(schema: str, key: str) -> str:
     """Read a gsettings value."""
-    result = run_command(f"gsettings get {schema} {key}")
+    result = run_command(f"gsettings get {shlex.quote(schema)} {shlex.quote(key)}")
     if result.returncode != 0:
         return f"Error reading {schema} {key}: {result.stderr}"
     return result.stdout
@@ -122,7 +125,7 @@ def get_settings(schema: str, key: str) -> str:
 def set_settings(schema: str, key: str, value: str) -> str:
     """Write a gsettings value."""
     result = run_audited(
-        f"gsettings set {schema} {key} {value}",
+        f"gsettings set {shlex.quote(schema)} {shlex.quote(key)} {shlex.quote(value)}",
         tool="set_settings",
         args={"schema": schema, "key": key, "value": value},
     )

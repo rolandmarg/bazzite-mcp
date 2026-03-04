@@ -1,3 +1,5 @@
+import shlex
+
 from bazzite_mcp.runner import run_audited, run_command
 
 
@@ -15,8 +17,9 @@ def install_package(package: str, method: str | None = None) -> str:
     if method:
         return _install_with_method(package, method)
 
+    pkg = shlex.quote(package)
     ujust_check = run_command(
-        f"ujust --summary 2>/dev/null | grep -i 'install.*{package}\\|setup.*{package}'"
+        f"ujust --summary 2>/dev/null | grep -iE {shlex.quote(f'install.*{package}|setup.*{package}')}"
     )
     if ujust_check.returncode == 0 and ujust_check.stdout.strip():
         commands = ujust_check.stdout.strip().split("\n")
@@ -26,14 +29,14 @@ def install_package(package: str, method: str | None = None) -> str:
             + f"\n\nRun with: ujust_run tool\n\n{INSTALL_POLICY}"
         )
 
-    flatpak_check = run_command(f"flatpak search {package} 2>/dev/null")
+    flatpak_check = run_command(f"flatpak search {pkg} 2>/dev/null")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
         return (
             f"Flatpak results for '{package}':\n{flatpak_check.stdout}\n\n"
             f"Recommended: flatpak install flathub <app-id>\n\n{INSTALL_POLICY}"
         )
 
-    brew_check = run_command(f"brew search {package} 2>/dev/null")
+    brew_check = run_command(f"brew search {pkg} 2>/dev/null")
     if brew_check.returncode == 0 and brew_check.stdout.strip():
         return (
             f"Homebrew results for '{package}':\n{brew_check.stdout}\n\n"
@@ -48,16 +51,17 @@ def install_package(package: str, method: str | None = None) -> str:
 
 
 def _install_with_method(package: str, method: str) -> str:
+    pkg = shlex.quote(package)
     method_commands = {
-        "flatpak": f"flatpak install -y flathub {package}",
-        "brew": f"brew install {package}",
-        "rpm-ostree": f"rpm-ostree install {package}",
-        "ujust": f"ujust {package}",
+        "flatpak": f"flatpak install -y flathub {pkg}",
+        "brew": f"brew install {pkg}",
+        "rpm-ostree": f"rpm-ostree install {pkg}",
+        "ujust": f"ujust {pkg}",
     }
     rollback_commands = {
-        "flatpak": f"flatpak uninstall -y {package}",
-        "brew": f"brew uninstall {package}",
-        "rpm-ostree": f"rpm-ostree uninstall {package}",
+        "flatpak": f"flatpak uninstall -y {pkg}",
+        "brew": f"brew uninstall {pkg}",
+        "rpm-ostree": f"rpm-ostree uninstall {pkg}",
     }
     if method not in method_commands:
         return f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
@@ -78,15 +82,16 @@ def _install_with_method(package: str, method: str) -> str:
 
 def remove_package(package: str, method: str) -> str:
     """Remove package via original install method."""
+    pkg = shlex.quote(package)
     method_commands = {
-        "flatpak": f"flatpak uninstall -y {package}",
-        "brew": f"brew uninstall {package}",
-        "rpm-ostree": f"rpm-ostree uninstall {package}",
+        "flatpak": f"flatpak uninstall -y {pkg}",
+        "brew": f"brew uninstall {pkg}",
+        "rpm-ostree": f"rpm-ostree uninstall {pkg}",
     }
     reinstall_commands = {
-        "flatpak": f"flatpak install -y flathub {package}",
-        "brew": f"brew install {package}",
-        "rpm-ostree": f"rpm-ostree install {package}",
+        "flatpak": f"flatpak install -y flathub {pkg}",
+        "brew": f"brew install {pkg}",
+        "rpm-ostree": f"rpm-ostree install {pkg}",
     }
     if method not in method_commands:
         return f"Unknown method '{method}'. Supported: {', '.join(method_commands.keys())}"
@@ -107,15 +112,16 @@ def search_package(package: str) -> str:
     """Search package across ujust, flatpak, brew."""
     parts: list[str] = []
 
-    ujust_check = run_command(f"ujust --summary 2>/dev/null | grep -i '{package}'")
+    pkg = shlex.quote(package)
+    ujust_check = run_command(f"ujust --summary 2>/dev/null | grep -i {pkg}")
     if ujust_check.returncode == 0 and ujust_check.stdout.strip():
         parts.append(f"[Tier 1 - ujust]\n{ujust_check.stdout}")
 
-    flatpak_check = run_command(f"flatpak search {package} 2>/dev/null")
+    flatpak_check = run_command(f"flatpak search {pkg} 2>/dev/null")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
         parts.append(f"[Tier 2 - Flatpak]\n{flatpak_check.stdout}")
 
-    brew_check = run_command(f"brew search {package} 2>/dev/null")
+    brew_check = run_command(f"brew search {pkg} 2>/dev/null")
     if brew_check.returncode == 0 and brew_check.stdout.strip():
         parts.append(f"[Tier 3 - Homebrew]\n{brew_check.stdout}")
 

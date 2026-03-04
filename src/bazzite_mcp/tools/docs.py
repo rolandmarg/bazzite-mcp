@@ -45,7 +45,9 @@ def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
     parsed_base = urlparse(cfg.docs_base_url)
     links: set[str] = set()
     for a_tag in soup.find_all("a", href=True):
-        href = a_tag["href"]
+        href = a_tag.get("href")
+        if not isinstance(href, str):
+            continue
         full_url = urljoin(base_url, href)
         parsed = urlparse(full_url)
         # Only follow links within docs.bazzite.gg, skip anchors/external/CDN
@@ -62,21 +64,48 @@ def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
     return links
 
 
-def query_bazzite_docs(query: str) -> str:
-    """Full-text search cached Bazzite docs."""
-    cache = DocsCache()
+def _ensure_fresh_docs_cache(cache: DocsCache) -> tuple[DocsCache, str]:
+    """Refresh docs on demand when cache is empty or stale."""
+    reason = ""
     if cache.page_count() == 0:
-        return "Docs cache is empty. Run refresh_docs_cache() to populate it from docs.bazzite.gg."
+        reason = "empty"
+    elif cache.is_stale():
+        reason = "stale"
+
+    if not reason:
+        return cache, ""
+
+    report = refresh_docs_cache()
+    refreshed_cache = DocsCache()
+    if refreshed_cache.page_count() == 0:
+        return refreshed_cache, (
+            "\n\nNote: auto-refresh ran but docs cache is still empty. "
+            f"Refresh report: {report.splitlines()[0]}"
+        )
+
+    return refreshed_cache, (
+        f"\n\nNote: auto-refreshed docs cache ({reason} cache). "
+        f"{report.splitlines()[0]}"
+    )
+
+
+def query_bazzite_docs(query: str) -> str:
+    """Full-text search cached Bazzite docs.
+
+    Auto-refreshes cache when empty or stale.
+    """
+    cache = DocsCache()
+    cache, refresh_note = _ensure_fresh_docs_cache(cache)
+
+    if cache.page_count() == 0:
+        return (
+            "Docs cache is empty. Auto-refresh was attempted but no pages were cached."
+            + refresh_note
+        )
 
     results = cache.search(query)
     if not results:
         return f"No results for '{query}' in cached docs."
-
-    stale_notice = (
-        "\n\nNote: cache may be stale; consider running refresh_docs_cache()."
-        if cache.is_stale()
-        else ""
-    )
 
     parts: list[str] = []
     for result in results:
@@ -84,7 +113,7 @@ def query_bazzite_docs(query: str) -> str:
         parts.append(
             f"### {result['title']} ({result['section']})\n{snippet}\nSource: {result['url']}"
         )
-    return "\n\n---\n\n".join(parts) + stale_notice
+    return "\n\n---\n\n".join(parts) + refresh_note
 
 
 def semantic_search_docs(query: str, limit: int = 5) -> str:
@@ -92,17 +121,24 @@ def semantic_search_docs(query: str, limit: int = 5) -> str:
 
     Uses embeddings for meaning-based matching (e.g. 'how to run android apps'
     finds Waydroid docs even without exact keyword match).
+    Auto-refreshes cache when empty or stale.
     Requires an embedding API key to be configured.
     Falls back to FTS5 keyword search if embeddings are unavailable.
     """
     cache = DocsCache()
+    cache, refresh_note = _ensure_fresh_docs_cache(cache)
+
     if cache.page_count() == 0:
-        return "Docs cache is empty. Run refresh_docs_cache() to populate it."
+        return (
+            "Docs cache is empty. Auto-refresh was attempted but no pages were cached."
+            + refresh_note
+        )
 
     results = semantic_search(cache._conn, query, limit=limit)
     if not results:
         # Fall back to keyword search
-        return query_bazzite_docs(query)
+        fallback = query_bazzite_docs(query)
+        return fallback + refresh_note
 
     parts: list[str] = []
     for r in results:
@@ -111,7 +147,7 @@ def semantic_search_docs(query: str, limit: int = 5) -> str:
             f"### {r['title']} ({r['section']}) [score: {r['score']}]\n"
             f"{snippet}\nSource: {r['url']}"
         )
-    return "\n\n---\n\n".join(parts)
+    return "\n\n---\n\n".join(parts) + refresh_note
 
 
 def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
@@ -126,7 +162,9 @@ def bazzite_changelog(version: str | None = None, count: int = 5) -> str:
         )
 
     try:
-        response = httpx.get(cfg.github_releases_url, params={"per_page": count}, timeout=15)
+        response = httpx.get(
+            cfg.github_releases_url, params={"per_page": count}, timeout=15
+        )
         response.raise_for_status()
         releases = response.json()
     except Exception as exc:
@@ -167,10 +205,7 @@ def install_policy(app_type: str) -> str:
             "For drivers and kernel-adjacent packages, rpm-ostree is Tier 6 (last resort).\n"
             "Use only when no alternative exists; it can block updates/rebases."
         ),
-        "android": (
-            "For Android apps, use Waydroid.\n"
-            "Setup via: ujust setup-waydroid"
-        ),
+        "android": ("For Android apps, use Waydroid.\nSetup via: ujust setup-waydroid"),
     }
 
     if app_type not in policies:
@@ -241,7 +276,9 @@ def refresh_docs_cache() -> str:
 
     # Fetch changelogs from GitHub
     try:
-        response = httpx.get(cfg.github_releases_url, params={"per_page": 10}, timeout=15)
+        response = httpx.get(
+            cfg.github_releases_url, params={"per_page": 10}, timeout=15
+        )
         response.raise_for_status()
         for release in response.json():
             cache.store_changelog(
@@ -262,6 +299,8 @@ def refresh_docs_cache() -> str:
     elif not embed_errors:
         report += "\nEmbeddings: skipped (no new pages to embed)."
     if errors:
-        report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(f"  - {err}" for err in errors)
+        report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(
+            f"  - {err}" for err in errors
+        )
     report += f"\nSkipped {len(visited) - fetched} pages (no content or errors)."
     return report

@@ -1,4 +1,4 @@
-from bazzite_mcp.cache.docs_cache import DocsCache
+from bazzite_mcp.cache.docs_cache import DocsCache, _sanitize_fts5_query
 
 
 def test_store_and_search(tmp_path, monkeypatch) -> None:
@@ -27,3 +27,43 @@ def test_cache_staleness(tmp_path, monkeypatch) -> None:
     cache._conn.execute("UPDATE pages SET fetched_at = '2020-01-01T00:00:00Z'")
     cache._conn.commit()
     assert cache.is_stale() is True
+
+
+# --- FTS5 query sanitization ---
+
+
+def test_fts5_sanitize_normal_query() -> None:
+    assert _sanitize_fts5_query("flatpak gui") == '"flatpak" "gui"'
+
+
+def test_fts5_sanitize_strips_operators() -> None:
+    result = _sanitize_fts5_query('foo OR bar NOT "baz"')
+    assert "OR" not in result or '"OR"' in result
+    assert '"foo"' in result
+    assert '"bar"' in result
+
+
+def test_fts5_sanitize_empty_query() -> None:
+    assert _sanitize_fts5_query("") == '""'
+
+
+def test_fts5_sanitize_special_chars() -> None:
+    result = _sanitize_fts5_query("test* AND (foo)")
+    assert '"test"' in result
+    assert '"AND"' in result
+    assert '"foo"' in result
+
+
+def test_search_with_injection_attempt(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    cache = DocsCache()
+    cache.store_page(
+        url="https://docs.bazzite.gg/test",
+        title="Test",
+        content="Test content for safety",
+        section="Test",
+    )
+    # Should not crash with FTS5 special syntax
+    results = cache.search('* OR "injection" NEAR/5')
+    # May return results or empty, but should not raise
+    assert isinstance(results, list)

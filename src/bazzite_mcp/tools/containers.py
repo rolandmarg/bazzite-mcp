@@ -1,3 +1,5 @@
+import shlex
+
 from bazzite_mcp.runner import run_audited, run_command
 
 
@@ -19,11 +21,13 @@ def create_distrobox(name: str, image: str | None = None) -> str:
     elif not image:
         image = "ubuntu:latest"
 
+    sname = shlex.quote(name)
+    simage = shlex.quote(image)
     result = run_audited(
-        f"distrobox create --name {name} --image {image} --yes",
+        f"distrobox create --name {sname} --image {simage} --yes",
         tool="create_distrobox",
         args={"name": name, "image": image},
-        rollback=f"distrobox rm --force {name}",
+        rollback=f"distrobox rm --force {sname}",
     )
     if result.returncode != 0:
         return f"Failed to create distrobox '{name}': {result.stderr}"
@@ -32,6 +36,7 @@ def create_distrobox(name: str, image: str | None = None) -> str:
 
 def manage_distrobox(name: str, action: str) -> str:
     """Manage a distrobox container."""
+    sname = shlex.quote(name)
     if action == "enter":
         return (
             "To enter interactively, run in your terminal:\n"
@@ -40,13 +45,13 @@ def manage_distrobox(name: str, action: str) -> str:
         )
     if action == "stop":
         result = run_audited(
-            f"distrobox stop --yes {name}",
+            f"distrobox stop --yes {sname}",
             tool="manage_distrobox",
             args={"name": name, "action": action},
         )
     elif action == "remove":
         result = run_audited(
-            f"distrobox rm --force {name}",
+            f"distrobox rm --force {sname}",
             tool="manage_distrobox",
             args={"name": name, "action": action},
         )
@@ -64,7 +69,7 @@ def list_distroboxes() -> str:
 
 def exec_in_distrobox(name: str, command: str) -> str:
     """Run a command inside a specific distrobox container."""
-    result = run_command(f"distrobox enter {name} -- {command}")
+    result = run_command(f"distrobox enter {shlex.quote(name)} -- {command}")
     output = result.stdout
     if result.stderr:
         output += f"\nSTDERR: {result.stderr}"
@@ -74,7 +79,7 @@ def exec_in_distrobox(name: str, command: str) -> str:
 def export_distrobox_app(name: str, app: str) -> str:
     """Export a GUI app from distrobox to host menu."""
     result = run_audited(
-        f"distrobox enter {name} -- distrobox-export --app {app}",
+        f"distrobox enter {shlex.quote(name)} -- distrobox-export --app {shlex.quote(app)}",
         tool="export_distrobox_app",
         args={"name": name, "app": app},
     )
@@ -96,11 +101,11 @@ def manage_quadlet(
         return result.stdout if result.stdout.strip() else "No Quadlet services found."
 
     if action == "status" and name:
-        result = run_command(f"systemctl --user status {name} --no-pager")
+        result = run_command(f"systemctl --user status {shlex.quote(name)} --no-pager")
         return result.stdout
 
     if action in ("start", "stop") and name:
-        result = run_command(f"systemctl --user {action} {name}")
+        result = run_command(f"systemctl --user {action} {shlex.quote(name)}")
         return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
 
     if action == "create" and name and image:
@@ -126,6 +131,9 @@ WantedBy=default.target
 
 def manage_podman(action: str, args: str = "") -> str:
     """Run podman container operations."""
+    valid_actions = ("run", "stop", "rm", "pull", "ps", "images", "logs", "inspect", "exec")
+    if action not in valid_actions:
+        return f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}"
     if action in ("run", "stop", "rm", "pull"):
         result = run_audited(
             f"podman {action} {args}",

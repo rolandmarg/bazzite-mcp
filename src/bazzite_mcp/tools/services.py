@@ -1,3 +1,5 @@
+import shlex
+
 from bazzite_mcp.runner import run_audited, run_command
 
 
@@ -16,12 +18,13 @@ def manage_service(name: str, action: str, user: bool = False) -> str:
         return f"Unknown action '{action}'. Supported: {', '.join(valid_actions)}."
 
     scope = "--user" if user else ""
+    sname = shlex.quote(name)
     # Determine rollback action
     reverse = {"start": "stop", "stop": "start", "enable": "disable", "disable": "enable",
                 "enable --now": "disable --now", "disable --now": "enable --now"}.get(action)
-    rollback_cmd = f"systemctl {scope} {reverse} {name}" if reverse else None
+    rollback_cmd = f"systemctl {scope} {reverse} {sname}" if reverse else None
     result = run_audited(
-        f"systemctl {scope} {action} {name}",
+        f"systemctl {scope} {action} {sname}",
         tool="manage_service",
         args={"name": name, "action": action, "user": user},
         rollback=rollback_cmd,
@@ -34,7 +37,7 @@ def manage_service(name: str, action: str, user: bool = False) -> str:
 def service_status(name: str, user: bool = False) -> str:
     """Get status of a systemd service."""
     scope = "--user" if user else ""
-    result = run_command(f"systemctl {scope} status {name} --no-pager")
+    result = run_command(f"systemctl {scope} status {shlex.quote(name)} --no-pager")
     return result.stdout if result.stdout else result.stderr
 
 
@@ -80,13 +83,15 @@ def manage_connection(
         result = run_command("nmcli connection show")
     elif action in ("up", "down", "delete") and name:
         result = run_audited(
-            f'nmcli connection {action} "{name}"',
+            f"nmcli connection {action} {shlex.quote(name)}",
             tool="manage_connection",
             args={"action": action, "name": name},
         )
     elif action == "modify" and name and properties:
+        # Note: properties is multi-token by design (nmcli key=value pairs).
+        # Guardrails check the full command for dangerous patterns.
         result = run_audited(
-            f'nmcli connection modify "{name}" {properties}',
+            f"nmcli connection modify {shlex.quote(name)} {properties}",
             tool="manage_connection",
             args={"action": action, "name": name, "properties": properties},
         )
@@ -105,32 +110,36 @@ def manage_firewall(
     if action == "list":
         result = run_command("firewall-cmd --list-all")
     elif action == "add-port" and port:
+        sport = shlex.quote(port)
         result = run_audited(
-            f"sudo firewall-cmd --add-port={port} --permanent && sudo firewall-cmd --reload",
+            f"sudo firewall-cmd --add-port={sport} --permanent && sudo firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "port": port},
-            rollback=f"sudo firewall-cmd --remove-port={port} --permanent && sudo firewall-cmd --reload",
+            rollback=f"sudo firewall-cmd --remove-port={sport} --permanent && sudo firewall-cmd --reload",
         )
     elif action == "remove-port" and port:
+        sport = shlex.quote(port)
         result = run_audited(
-            f"sudo firewall-cmd --remove-port={port} --permanent && sudo firewall-cmd --reload",
+            f"sudo firewall-cmd --remove-port={sport} --permanent && sudo firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "port": port},
-            rollback=f"sudo firewall-cmd --add-port={port} --permanent && sudo firewall-cmd --reload",
+            rollback=f"sudo firewall-cmd --add-port={sport} --permanent && sudo firewall-cmd --reload",
         )
     elif action == "add-service" and service:
+        ssvc = shlex.quote(service)
         result = run_audited(
-            f"sudo firewall-cmd --add-service={service} --permanent && sudo firewall-cmd --reload",
+            f"sudo firewall-cmd --add-service={ssvc} --permanent && sudo firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "service": service},
-            rollback=f"sudo firewall-cmd --remove-service={service} --permanent && sudo firewall-cmd --reload",
+            rollback=f"sudo firewall-cmd --remove-service={ssvc} --permanent && sudo firewall-cmd --reload",
         )
     elif action == "remove-service" and service:
+        ssvc = shlex.quote(service)
         result = run_audited(
-            f"sudo firewall-cmd --remove-service={service} --permanent && sudo firewall-cmd --reload",
+            f"sudo firewall-cmd --remove-service={ssvc} --permanent && sudo firewall-cmd --reload",
             tool="manage_firewall",
             args={"action": action, "service": service},
-            rollback=f"sudo firewall-cmd --add-service={service} --permanent && sudo firewall-cmd --reload",
+            rollback=f"sudo firewall-cmd --add-service={ssvc} --permanent && sudo firewall-cmd --reload",
         )
     else:
         return "Usage: action='list|add-port|remove-port|add-service|remove-service'"

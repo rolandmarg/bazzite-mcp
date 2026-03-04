@@ -1,3 +1,5 @@
+import shlex
+
 from bazzite_mcp.runner import run_audited, run_command
 
 
@@ -15,7 +17,7 @@ def ujust_list(filter: str | None = None) -> str:
 
 def ujust_show(command: str) -> str:
     """Show the source script of a ujust command before running it."""
-    result = run_command(f"ujust --show {command}")
+    result = run_command(f"ujust --show {shlex.quote(command)}")
     if result.returncode != 0:
         return f"Error showing command '{command}': {result.stderr}"
     return result.stdout
@@ -27,8 +29,12 @@ def ujust_run(command: str) -> str:
     ujust is Bazzite's built-in command runner for system setup, configuration,
     and maintenance. It is the first method to check for system operations.
     """
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return "Invalid command syntax."
     result = run_audited(
-        f"ujust {command}",
+        f"ujust {shlex.join(parts)}",
         tool="ujust_run",
         args={"command": command},
     )

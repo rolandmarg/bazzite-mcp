@@ -50,7 +50,7 @@ def get_server_info() -> str:
         f"# bazzite-mcp\n\n"
         f"Repo: {cfg.repo_slug}\n"
         f"Docs source: {cfg.docs_base_url}\n"
-        f"Cache TTL: {cfg.cache_ttl_days} days\n"
+        f"Cache TTL: {cfg.cache_ttl_seconds() // 3600} hours\n"
         f"Max crawl pages: {cfg.crawl_max_pages}\n"
         f"Cached pages: {cache.page_count()}\n"
         f"Cache stale: {cache.is_stale()}\n"

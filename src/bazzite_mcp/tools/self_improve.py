@@ -72,8 +72,9 @@ def contribute_fix(branch_name: str, description: str, files_changed: str) -> st
     if create_branch.returncode != 0:
         return f"Failed to create branch: {create_branch.stderr}"
 
+    safe_files = " ".join(shlex.quote(f) for f in shlex.split(files_changed))
     commit_cmd = (
-        f"git -C {repo} add {files_changed} && "
+        f"git -C {repo} add {safe_files} && "
         f"git -C {repo} commit -m {shlex.quote(f'feat: {description[:72]}')}"
     )
     commit = run_command(commit_cmd)
