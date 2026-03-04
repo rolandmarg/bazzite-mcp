@@ -42,15 +42,6 @@ def test_config_validation_rejects_negative_ttl_days():
         Config(cache_ttl_days=-1)
 
 
-def test_config_validation_rejects_unknown_embedding_provider():
-    with pytest.raises(ValueError, match="Unknown embedding_provider"):
-        Config(embedding_provider="bogus")
-
-
-def test_config_validation_rejects_nonpositive_dimensions():
-    with pytest.raises(ValueError, match="embedding_dimensions"):
-        Config(embedding_dimensions=0)
-
 
 def test_config_validation_rejects_nonpositive_crawl_pages():
     with pytest.raises(ValueError, match="crawl_max_pages"):

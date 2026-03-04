@@ -8,8 +8,6 @@ from bazzite_mcp.tools.docs import (
     _extract_content,
     install_policy,
     query_bazzite_docs,
-    reciprocal_rank_fusion,
-    semantic_search_docs,
 )
 
 
@@ -181,61 +179,21 @@ def test_discover_doc_links_filters_cdn_cgi(mock_cfg: MagicMock) -> None:
     assert len(links) == 0
 
 
-def test_reciprocal_rank_fusion_prioritizes_overlap() -> None:
-    keyword = [
-        {
-            "url": "https://docs.bazzite.gg/a",
-            "title": "A",
-            "section": "s",
-            "content": "a",
-        },
-        {
-            "url": "https://docs.bazzite.gg/b",
-            "title": "B",
-            "section": "s",
-            "content": "b",
-        },
-    ]
-    semantic = [
-        {
-            "url": "https://docs.bazzite.gg/b",
-            "title": "B",
-            "section": "s",
-            "content": "b semantic",
-            "score": 0.95,
-        },
-        {
-            "url": "https://docs.bazzite.gg/c",
-            "title": "C",
-            "section": "s",
-            "content": "c",
-            "score": 0.8,
-        },
-    ]
-
-    fused = reciprocal_rank_fusion(keyword, semantic, limit=3)
-    assert fused[0]["url"] == "https://docs.bazzite.gg/b"
-    assert fused[0]["search_mode"] == "hybrid"
-    assert len(fused) == 3
-
-
 # --- query_bazzite_docs tests (async) ---
 
 
-@patch("bazzite_mcp.tools.docs.semantic_search", new_callable=AsyncMock)
 @patch("bazzite_mcp.tools.docs.refresh_docs_cache", new_callable=AsyncMock)
 @patch("bazzite_mcp.tools.docs.DocsCache")
 def test_query_bazzite_docs_auto_refreshes_when_empty(
     mock_cache_cls: MagicMock,
     mock_refresh: AsyncMock,
-    mock_semantic_search: AsyncMock,
 ) -> None:
     empty_cache = MagicMock()
     empty_cache.page_count.return_value = 0
 
     refreshed_cache = MagicMock()
     refreshed_cache.page_count.return_value = 1
-    refreshed_cache.search_scored.return_value = [
+    refreshed_cache.search.return_value = [
         {
             "title": "Installation Guide",
             "section": "General",
@@ -246,7 +204,6 @@ def test_query_bazzite_docs_auto_refreshes_when_empty(
 
     mock_cache_cls.side_effect = [empty_cache, refreshed_cache]
     mock_refresh.return_value = "Refreshed docs cache: 1 pages crawled (max 100)."
-    mock_semantic_search.return_value = []
 
     result = asyncio.run(query_bazzite_docs("installation"))
     assert "Installation Guide" in result
@@ -254,15 +211,13 @@ def test_query_bazzite_docs_auto_refreshes_when_empty(
     mock_refresh.assert_called_once()
 
 
-@patch("bazzite_mcp.tools.docs.semantic_search", new_callable=AsyncMock)
 @patch("bazzite_mcp.tools.docs.DocsCache")
 def test_query_bazzite_docs_with_results(
     mock_cache_cls: MagicMock,
-    mock_semantic_search: AsyncMock,
 ) -> None:
     mock_cache = MagicMock()
     mock_cache.page_count.return_value = 50
-    mock_cache.search_scored.return_value = [
+    mock_cache.search.return_value = [
         {
             "title": "Installation Guide",
             "section": "General",
@@ -273,7 +228,6 @@ def test_query_bazzite_docs_with_results(
     ]
     mock_cache.is_stale.return_value = False
     mock_cache_cls.return_value = mock_cache
-    mock_semantic_search.return_value = []
 
     result = asyncio.run(query_bazzite_docs("installation"))
     assert "Installation Guide" in result
@@ -281,53 +235,16 @@ def test_query_bazzite_docs_with_results(
     assert "Source:" in result
 
 
-@patch("bazzite_mcp.tools.docs.semantic_search", new_callable=AsyncMock)
 @patch("bazzite_mcp.tools.docs.DocsCache")
 def test_query_bazzite_docs_no_results(
     mock_cache_cls: MagicMock,
-    mock_semantic_search: AsyncMock,
 ) -> None:
     mock_cache = MagicMock()
     mock_cache.page_count.return_value = 50
     mock_cache.is_stale.return_value = False
-    mock_cache.search_scored.return_value = []
+    mock_cache.search.return_value = []
     mock_cache_cls.return_value = mock_cache
-    mock_semantic_search.return_value = []
 
     result = asyncio.run(query_bazzite_docs("xyznonexistent"))
     assert "No results" in result
     assert "xyznonexistent" in result
-
-
-@patch("bazzite_mcp.tools.docs.semantic_search", new_callable=AsyncMock)
-@patch("bazzite_mcp.tools.docs.refresh_docs_cache", new_callable=AsyncMock)
-@patch("bazzite_mcp.tools.docs.DocsCache")
-def test_semantic_search_auto_refreshes_when_empty(
-    mock_cache_cls: MagicMock,
-    mock_refresh: AsyncMock,
-    mock_semantic_search: AsyncMock,
-) -> None:
-    empty_cache = MagicMock()
-    empty_cache.page_count.return_value = 0
-
-    refreshed_cache = MagicMock()
-    refreshed_cache.page_count.return_value = 10
-    refreshed_cache._conn = MagicMock()
-
-    mock_cache_cls.side_effect = [empty_cache, refreshed_cache]
-    mock_refresh.return_value = "Refreshed docs cache: 10 pages crawled (max 100)."
-    mock_semantic_search.return_value = [
-        {
-            "title": "Waydroid Setup",
-            "section": "android",
-            "url": "https://docs.bazzite.gg/Installing_and_Managing_Software/Waydroid/",
-            "content": "Use Waydroid to run Android apps.",
-            "score": 0.9231,
-        }
-    ]
-
-    result = asyncio.run(semantic_search_docs("how to run android apps", limit=3))
-    assert "Waydroid Setup" in result
-    assert "score" in result
-    assert "auto-refreshed docs cache" in result
-    mock_refresh.assert_called_once()

@@ -64,18 +64,6 @@ CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE ON pages BEGIN
     VALUES (new.id, new.title, new.content, new.section);
 END;
 
-CREATE TABLE IF NOT EXISTS embeddings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    page_id INTEGER NOT NULL,
-    chunk_index INTEGER NOT NULL DEFAULT 0,
-    chunk_text TEXT NOT NULL,
-    embedding BLOB NOT NULL,
-    dimensions INTEGER NOT NULL,
-    model TEXT DEFAULT '',
-    FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
-    UNIQUE(page_id, chunk_index)
-);
-
 CREATE TABLE IF NOT EXISTS changelogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     version TEXT NOT NULL UNIQUE,
@@ -93,12 +81,3 @@ def ensure_tables(conn: sqlite3.Connection, db_type: str) -> None:
     conn.commit()
 
 
-def migrate_cache_schema(conn: sqlite3.Connection) -> None:
-    """Apply lightweight cache DB migrations for existing installations."""
-    cols = {
-        str(row["name"])
-        for row in conn.execute("PRAGMA table_info(embeddings)").fetchall()
-    }
-    if "model" not in cols:
-        conn.execute("ALTER TABLE embeddings ADD COLUMN model TEXT DEFAULT ''")
-        conn.commit()

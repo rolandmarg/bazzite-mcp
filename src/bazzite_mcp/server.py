@@ -23,7 +23,6 @@ from bazzite_mcp.tools.docs import (
     install_policy,
     query_bazzite_docs,
     refresh_docs_cache,
-    semantic_search_docs,
 )
 from bazzite_mcp.tools.packages import (
     install_package,
@@ -31,13 +30,6 @@ from bazzite_mcp.tools.packages import (
     remove_package,
     search_package,
     update_packages,
-)
-from bazzite_mcp.tools.self_improve import (
-    contribute_fix,
-    get_server_source,
-    list_improvements,
-    list_pending_prs,
-    suggest_improvement,
 )
 from bazzite_mcp.tools.services import (
     list_services,
@@ -74,7 +66,7 @@ mcp = FastMCP(
         "Bazzite OS management server. Key principles:\n"
         "1. Always check ujust first for system operations (ujust_list, ujust_show, ujust_run)\n"
         "2. Follow the 6-tier install hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree\n"
-        "3. Use query_bazzite_docs for keyword lookups, semantic_search_docs for natural language questions\n"
+        "3. Use query_bazzite_docs to search cached documentation\n"
         "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
         "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
         "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing"
@@ -131,7 +123,6 @@ mcp.tool(process_list)
 
 # Knowledge and docs
 mcp.tool(query_bazzite_docs)
-mcp.tool(semantic_search_docs)
 mcp.tool(bazzite_changelog)
 mcp.tool(install_policy)
 mcp.tool(refresh_docs_cache)
@@ -139,13 +130,6 @@ mcp.tool(refresh_docs_cache)
 # Audit
 mcp.tool(audit_log_query)
 mcp.tool(rollback_action)
-
-# Self-improvement
-mcp.tool(suggest_improvement)
-mcp.tool(contribute_fix)
-mcp.tool(list_improvements)
-mcp.tool(list_pending_prs)
-mcp.tool(get_server_source)
 
 # MCP Resources — read-only context
 mcp.resource(

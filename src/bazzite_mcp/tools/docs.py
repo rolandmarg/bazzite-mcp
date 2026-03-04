@@ -1,4 +1,3 @@
-import re
 import asyncio
 import logging
 from urllib.parse import urljoin, urlparse
@@ -8,7 +7,6 @@ from bs4 import BeautifulSoup, Tag
 from mcp.server.fastmcp import Context
 
 from bazzite_mcp.cache.docs_cache import DocsCache
-from bazzite_mcp.cache.embeddings import embed_pages, semantic_search
 from bazzite_mcp.config import load_config
 from bazzite_mcp.runner import ToolError
 
@@ -99,63 +97,10 @@ async def _ensure_fresh_docs_cache(
     )
 
 
-def reciprocal_rank_fusion(
-    keyword_results: list[dict],
-    semantic_results: list[dict],
-    k: int = 60,
-    limit: int = 10,
-) -> list[dict]:
-    """Fuse keyword and semantic rankings with reciprocal rank fusion."""
-    fused_scores: dict[str, float] = {}
-    merged: dict[str, dict] = {}
-    keyword_urls: set[str] = set()
-    semantic_urls: set[str] = set()
-
-    for rank, result in enumerate(keyword_results):
-        url = str(result.get("url", ""))
-        if not url:
-            continue
-        keyword_urls.add(url)
-        fused_scores[url] = fused_scores.get(url, 0.0) + 1.0 / (k + rank + 1)
-        merged[url] = dict(result)
-
-    for rank, result in enumerate(semantic_results):
-        url = str(result.get("url", ""))
-        if not url:
-            continue
-        semantic_urls.add(url)
-        fused_scores[url] = fused_scores.get(url, 0.0) + 1.0 / (k + rank + 1)
-        if url not in merged:
-            merged[url] = dict(result)
-            continue
-
-        if len(str(result.get("content", ""))) > len(
-            str(merged[url].get("content", ""))
-        ):
-            merged[url]["content"] = result.get("content", "")
-        if "score" in result:
-            merged[url]["semantic_score"] = result["score"]
-
-    ranked_urls = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
-    fused: list[dict] = []
-    for url, score in ranked_urls[:limit]:
-        item = dict(merged[url])
-        item["fused_score"] = round(score, 6)
-        if url in keyword_urls and url in semantic_urls:
-            item["search_mode"] = "hybrid"
-        elif url in semantic_urls:
-            item["search_mode"] = "semantic"
-        else:
-            item["search_mode"] = "keyword"
-        fused.append(item)
-    return fused
-
-
 async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
-    """Keyword search over cached Bazzite documentation (FTS5).
+    """Search cached Bazzite documentation using full-text search.
 
-    Best for: exact terms, command names, package names, error messages.
-    Use semantic_search_docs instead for natural language questions.
+    Searches page titles, content, and sections with synonym expansion.
     Auto-refreshes cache when empty or stale.
     """
     cache = DocsCache()
@@ -167,70 +112,16 @@ async def query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
             + refresh_note
         )
 
-    keyword_results = cache.search_scored(query, limit=20)
-    semantic_results = await semantic_search(cache._conn, query, limit=20)
-
-    if semantic_results:
-        results = reciprocal_rank_fusion(keyword_results, semantic_results, limit=10)
-    else:
-        results = keyword_results[:10]
+    results = cache.search(query, limit=10)
 
     if not results:
-        return f"No results for '{query}' in cached docs."
+        return f"No results for '{query}' in cached docs." + refresh_note
 
     parts: list[str] = []
     for result in results:
         snippet = result["content"][:500]
-        score_suffix = ""
-        if "fused_score" in result:
-            score_suffix = (
-                f" [{result.get('search_mode', 'hybrid')}: {result['fused_score']}]"
-            )
         parts.append(
-            f"### {result['title']} ({result['section']}){score_suffix}\n{snippet}\nSource: {result['url']}"
-        )
-    return "\n\n---\n\n".join(parts) + refresh_note
-
-
-async def semantic_search_docs(
-    query: str, limit: int = 5, ctx: Context | None = None
-) -> str:
-    """Semantic similarity search over cached Bazzite docs using AI embeddings.
-
-    Best for: natural language questions where exact keywords may not match
-    (e.g. 'how to run android apps' finds Waydroid docs).
-    Use query_bazzite_docs instead for exact keyword/command name lookups.
-    Falls back to keyword search if embeddings are unavailable.
-    """
-    cache = DocsCache()
-    cache, refresh_note = await _ensure_fresh_docs_cache(cache, ctx)
-
-    if cache.page_count() == 0:
-        return (
-            "Docs cache is empty. Auto-refresh was attempted but no pages were cached."
-            + refresh_note
-        )
-
-    results = await semantic_search(cache._conn, query, limit=limit)
-    if not results:
-        # Fall back to keyword search
-        fallback = cache.search(query)
-        if not fallback:
-            return f"No results for '{query}' in cached docs." + refresh_note
-        parts: list[str] = []
-        for r in fallback:
-            snippet = r["content"][:500]
-            parts.append(
-                f"### {r['title']} ({r['section']})\n{snippet}\nSource: {r['url']}"
-            )
-        return "\n\n---\n\n".join(parts) + refresh_note
-
-    parts: list[str] = []
-    for r in results:
-        snippet = r["content"][:500]
-        parts.append(
-            f"### {r['title']} ({r['section']}) [score: {r['score']}]\n"
-            f"{snippet}\nSource: {r['url']}"
+            f"### {result['title']} ({result['section']})\n{snippet}\nSource: {result['url']}"
         )
     return "\n\n---\n\n".join(parts) + refresh_note
 
@@ -430,18 +321,10 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
                 content=page["content"],
                 section=page["section"],
             )
-        embedded, embed_errors = await embed_pages(cache._conn)
-        errors.extend(embed_errors)
     else:
-        embedded = 0
-        embed_errors = []
         errors.append("No docs pages were fetched; existing cache was preserved.")
 
     report = f"Refreshed docs cache: {fetched} pages crawled (max {max_pages})."
-    if embedded:
-        report += f"\nEmbeddings: {embedded} chunks embedded for semantic search."
-    elif not embed_errors:
-        report += "\nEmbeddings: skipped (no new pages to embed)."
     if errors:
         logger.warning("Docs cache refresh completed with %s errors", len(errors))
         report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(

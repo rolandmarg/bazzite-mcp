@@ -54,23 +54,12 @@ def _load_env_file() -> None:
 
 @dataclass
 class Config:
-    # GitHub
-    repo_slug: str = "rolandmarg/bazzite-mcp"
-    repo_local: str = ""
-
     # Docs cache
     cache_ttl_days: int = 7
     cache_ttl_hours: int | None = 12
     docs_base_url: str = "https://docs.bazzite.gg"
     github_releases_url: str = "https://api.github.com/repos/ublue-os/bazzite/releases"
     crawl_max_pages: int = 100
-
-    # Embeddings (provider: "gemini" or "openai")
-    embedding_provider: str = "gemini"
-    embedding_model: str = "gemini-embedding-001"
-    embedding_api_key_env: str = "GEMINI_API_KEY"
-    embedding_dimensions: int = 768
-    embedding_chunk_size: int = 1000
 
     # Audit
     audit_output_max_chars: int = 500
@@ -80,16 +69,10 @@ class Config:
             raise ValueError("cache_ttl_days must be non-negative")
         if self.cache_ttl_hours is not None and self.cache_ttl_hours < 0:
             raise ValueError("cache_ttl_hours must be non-negative")
-        if self.embedding_provider not in ("gemini", "openai"):
-            raise ValueError(f"Unknown embedding_provider: {self.embedding_provider}")
-        if self.embedding_dimensions < 1:
-            raise ValueError("embedding_dimensions must be positive")
         if self.crawl_max_pages < 1:
             raise ValueError("crawl_max_pages must be positive")
 
     def __post_init__(self) -> None:
-        if not self.repo_local:
-            self.repo_local = str(Path(__file__).resolve().parents[2])
         self.validate()
 
     def cache_ttl_seconds(self) -> int:
@@ -113,8 +96,6 @@ def load_config() -> Config:
 
     # Env vars override config file
     env_overrides = {
-        "BAZZITE_MCP_REPO": "repo_slug",
-        "BAZZITE_MCP_LOCAL": "repo_local",
         "BAZZITE_MCP_CACHE_TTL_HOURS": "cache_ttl_hours",
         "BAZZITE_MCP_CACHE_TTL": "cache_ttl_days",
         "BAZZITE_MCP_CRAWL_MAX": "crawl_max_pages",
@@ -142,8 +123,7 @@ def load_config() -> Config:
 
     cfg.validate()
     logger.debug(
-        "Loaded bazzite-mcp config: repo=%s crawl_max=%s",
-        cfg.repo_slug,
+        "Loaded bazzite-mcp config: crawl_max=%s",
         cfg.crawl_max_pages,
     )
 

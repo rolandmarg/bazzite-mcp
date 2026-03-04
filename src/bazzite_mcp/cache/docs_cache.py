@@ -7,7 +7,6 @@ from bazzite_mcp.db import (
     ensure_tables,
     get_connection,
     get_db_path,
-    migrate_cache_schema,
 )
 
 
@@ -67,7 +66,6 @@ class DocsCache:
         db_path = get_db_path("docs_cache.db")
         self._conn = get_connection(db_path)
         ensure_tables(self._conn, "cache")
-        migrate_cache_schema(self._conn)
 
     def close(self) -> None:
         self._conn.close()
@@ -135,7 +133,6 @@ class DocsCache:
 
     def clear(self) -> None:
         logger.info("Clearing docs cache tables")
-        self._conn.execute("DELETE FROM embeddings")
         self._conn.execute("DELETE FROM pages")
         self._conn.execute("DELETE FROM pages_fts")
         self._conn.commit()
