@@ -69,9 +69,22 @@ class Config:
     # Audit
     audit_output_max_chars: int = 500
 
+    def validate(self) -> None:
+        if self.cache_ttl_days < 0:
+            raise ValueError("cache_ttl_days must be non-negative")
+        if self.cache_ttl_hours is not None and self.cache_ttl_hours < 0:
+            raise ValueError("cache_ttl_hours must be non-negative")
+        if self.embedding_provider not in ("gemini", "openai"):
+            raise ValueError(f"Unknown embedding_provider: {self.embedding_provider}")
+        if self.embedding_dimensions < 1:
+            raise ValueError("embedding_dimensions must be positive")
+        if self.crawl_max_pages < 1:
+            raise ValueError("crawl_max_pages must be positive")
+
     def __post_init__(self) -> None:
         if not self.repo_local:
             self.repo_local = str(Path(__file__).resolve().parents[2])
+        self.validate()
 
     def cache_ttl_seconds(self) -> int:
         if self.cache_ttl_hours is not None and self.cache_ttl_hours > 0:
@@ -102,8 +115,11 @@ def load_config() -> Config:
     }
 
     if path.exists():
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        try:
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Invalid TOML in {path}: {exc}") from exc
         for key, value in data.items():
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
@@ -116,6 +132,8 @@ def load_config() -> Config:
                 setattr(cfg, attr, field_type(val))
             except (ValueError, TypeError):
                 pass  # Ignore invalid env var values, keep default
+
+    cfg.validate()
 
     _config = cfg
     return cfg

@@ -1,9 +1,16 @@
+import asyncio
+import httpx
+from unittest.mock import AsyncMock, patch
+
 from bazzite_mcp.cache.embeddings import (
     _chunk_text,
     _cosine_similarity,
     _decode_vector,
+    _embed_query,
     _encode_vector,
+    semantic_search,
 )
+from bazzite_mcp.db import ensure_tables, get_connection, get_db_path
 
 
 def test_encode_decode_roundtrip():
@@ -61,3 +68,35 @@ def test_chunk_text_prefixes_context_when_provided():
         section="General",
     )
     assert chunks[0].startswith("[Install Guide > General] ")
+
+
+def test_semantic_search_returns_empty_when_embeddings_table_empty(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    conn = get_connection(get_db_path("cache-empty-search.db"))
+    ensure_tables(conn, "cache")
+
+    with patch(
+        "bazzite_mcp.cache.embeddings._embed_query",
+        new=AsyncMock(return_value=[0.1, 0.2, 0.3]),
+    ):
+        results = asyncio.run(semantic_search(conn, "test query", limit=5))
+    conn.close()
+    assert results == []
+
+
+def test_embed_query_handles_timeout_for_gemini():
+    class DummyCfg:
+        embedding_provider = "gemini"
+        embedding_model = "gemini-embedding-001"
+        embedding_dimensions = 768
+
+    with patch(
+        "bazzite_mcp.cache.embeddings.httpx.AsyncClient.post",
+        new=AsyncMock(side_effect=httpx.TimeoutException("timeout")),
+    ):
+        result = asyncio.run(_embed_query("hello", "fake-key", DummyCfg()))
+    assert result is None

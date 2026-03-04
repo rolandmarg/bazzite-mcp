@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from bazzite_mcp.config import Config, load_config, reset_config
 
 
@@ -32,4 +34,39 @@ def test_loads_env_file_when_present(tmp_path, monkeypatch):
 
     _ = load_config()
     assert os.environ.get("GEMINI_API_KEY") == "test-key"
+    reset_config()
+
+
+def test_config_validation_rejects_negative_ttl_days():
+    with pytest.raises(ValueError, match="cache_ttl_days"):
+        Config(cache_ttl_days=-1)
+
+
+def test_config_validation_rejects_unknown_embedding_provider():
+    with pytest.raises(ValueError, match="Unknown embedding_provider"):
+        Config(embedding_provider="bogus")
+
+
+def test_config_validation_rejects_nonpositive_dimensions():
+    with pytest.raises(ValueError, match="embedding_dimensions"):
+        Config(embedding_dimensions=0)
+
+
+def test_config_validation_rejects_nonpositive_crawl_pages():
+    with pytest.raises(ValueError, match="crawl_max_pages"):
+        Config(crawl_max_pages=0)
+
+
+def test_load_config_raises_on_malformed_toml(tmp_path, monkeypatch):
+    reset_config()
+    config_home = tmp_path / ".config"
+    cfg_dir = config_home / "bazzite-mcp"
+    cfg_dir.mkdir(parents=True)
+    cfg_file = cfg_dir / "config.toml"
+    cfg_file.write_text("cache_ttl_hours = ", encoding="utf-8")
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+
+    with pytest.raises(ValueError, match="Invalid TOML"):
+        load_config()
     reset_config()

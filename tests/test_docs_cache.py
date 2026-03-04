@@ -82,3 +82,51 @@ def test_search_expands_synonyms(tmp_path, monkeypatch) -> None:
     results = cache.search("browser sandbox")
     assert len(results) > 0
     assert "Flatpak" in results[0]["title"]
+
+
+def test_is_stale_accepts_z_suffix_timestamp(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    cache = DocsCache()
+    cache.store_page(
+        url="https://docs.bazzite.gg/fresh-z",
+        title="Fresh Z",
+        content="Fresh content",
+        section="Test",
+    )
+    cache._conn.execute(
+        "UPDATE pages SET fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+    )
+    cache._conn.commit()
+    assert cache.is_stale() is False
+
+
+def test_is_stale_accepts_offset_timestamp(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    cache = DocsCache()
+    cache.store_page(
+        url="https://docs.bazzite.gg/fresh-offset",
+        title="Fresh Offset",
+        content="Fresh content",
+        section="Test",
+    )
+    cache._conn.execute(
+        "UPDATE pages SET fetched_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')"
+    )
+    cache._conn.commit()
+    assert cache.is_stale() is False
+
+
+def test_is_stale_accepts_naive_timestamp(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    cache = DocsCache()
+    cache.store_page(
+        url="https://docs.bazzite.gg/fresh-naive",
+        title="Fresh Naive",
+        content="Fresh content",
+        section="Test",
+    )
+    cache._conn.execute(
+        "UPDATE pages SET fetched_at = strftime('%Y-%m-%dT%H:%M:%S', 'now')"
+    )
+    cache._conn.commit()
+    assert cache.is_stale() is False
