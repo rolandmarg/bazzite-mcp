@@ -39,7 +39,7 @@ def screenshot() -> str:
         return str(png_path)
 
     result = run_command(
-        f"magick {png_path} -resize 2560x -quality 75 {jpg_path}"
+        f"magick {png_path} -resize 5120x -quality 75 {jpg_path}"
     )
     if result.returncode != 0:
         return str(png_path)
