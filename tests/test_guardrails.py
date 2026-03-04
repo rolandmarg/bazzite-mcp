@@ -32,7 +32,9 @@ def test_allows_flatpak_install() -> None:
 
 def test_blocks_long_hostname() -> None:
     with pytest.raises(GuardrailError, match="hostname"):
-        check_command("hostnamectl set-hostname this-hostname-is-way-too-long-for-distrobox")
+        check_command(
+            "hostnamectl set-hostname this-hostname-is-way-too-long-for-distrobox"
+        )
 
 
 def test_allows_short_hostname() -> None:
@@ -105,4 +107,19 @@ def test_allows_safe_systemctl_start() -> None:
 
 def test_allows_safe_brew_install() -> None:
     result = check_command("brew install ripgrep")
+    assert result.allowed is True
+
+
+def test_allows_ujust_summary_stderr_redirect() -> None:
+    result = check_command("ujust --summary 2>/dev/null")
+    assert result.allowed is True
+
+
+def test_blocks_stdout_redirect_to_dev() -> None:
+    with pytest.raises(GuardrailError, match="/dev"):
+        check_command("echo foo > /dev/sda")
+
+
+def test_allows_stderr_redirect_for_cat() -> None:
+    result = check_command("cat 2>/dev/null")
     assert result.allowed is True
