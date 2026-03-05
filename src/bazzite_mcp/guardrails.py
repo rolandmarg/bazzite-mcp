@@ -67,6 +67,8 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "uname",
         "ujust",
         "vulkaninfo",
+        "virsh",
+        "virt-install",
         "waydroid",
         "xrandr",
         "ydotool",

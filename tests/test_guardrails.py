@@ -138,3 +138,13 @@ def test_blocks_shell_metacharacter_chaining() -> None:
 def test_blocks_command_substitution_pattern() -> None:
     with pytest.raises(GuardrailError, match="command substitution"):
         check_command("echo $(uname -a)")
+
+
+def test_allows_virsh_list() -> None:
+    result = check_command("virsh list --all")
+    assert result.allowed is True
+
+
+def test_allows_virt_install() -> None:
+    result = check_command("virt-install --name lab --memory 4096 --vcpus 2 --wait 0")
+    assert result.allowed is True
