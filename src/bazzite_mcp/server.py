@@ -40,6 +40,7 @@ from bazzite_mcp.tools.system import (
     system_info,
 )
 from bazzite_mcp.tools.ujust import ujust
+from bazzite_mcp.tools.virtualization import manage_vm
 
 
 mcp = FastMCP(
@@ -58,7 +59,7 @@ mcp = FastMCP(
     ),
 )
 
-# --- Tools (23 total) ---
+# --- Tools (24 total) ---
 
 # Core
 mcp.tool(ujust)
@@ -93,6 +94,9 @@ mcp.tool(manage_network)
 mcp.tool(manage_distrobox)
 mcp.tool(manage_quadlet)
 mcp.tool(manage_podman)
+
+# Virtualization
+mcp.tool(manage_vm)
 
 # Gaming
 mcp.tool(gaming)
