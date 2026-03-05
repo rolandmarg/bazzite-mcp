@@ -13,6 +13,7 @@ from typing import Literal
 from mcp.server.fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
+from bazzite_mcp.kwin_screenshot import capture_active_window, capture_screen
 from bazzite_mcp.portal import PortalClient, get_portal
 from bazzite_mcp.runner import run_command
 
@@ -21,6 +22,9 @@ YDOTOOL_SOCKET = SCREENSHOT_DIR / "ydotool.sock"
 
 # System Python is needed for AT-SPI (gi module lives in system site-packages).
 _SYSTEM_PYTHON = "/usr/bin/python3"
+
+# Module-level state: last screenshot coordinate metadata for send_input offset.
+_last_screenshot_meta: dict | None = None
 
 
 def _get_portal() -> PortalClient:
@@ -512,40 +516,8 @@ def _shell_quote(s: str) -> str:
 
 
 def _screenshot_desktop() -> Image:
-    """Capture the full desktop."""
-    portal = _get_portal()
-    if portal.is_connected:
-        result = portal.grab_frame()
-        if "jpeg_b64" in result:
-            import base64
-
-            jpeg_data = base64.b64decode(result["jpeg_b64"])
-            SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = int(time.time())
-            jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
-            jpg_path.write_bytes(jpeg_data)
-            return Image(path=str(jpg_path))
-    # Fallback to Spectacle
+    """Capture the full desktop via Spectacle fullscreen."""
     return _capture_and_compress("--fullscreen")
-
-
-def _screenshot_window(window: str) -> Image:
-    """Capture a specific window."""
-    uuid = _resolve_window(window)
-    prev_active = _kwin_get_active_uuid()
-
-    _kwin_activate(uuid)
-    time.sleep(0.4)
-
-    img = _capture_and_compress("--activewindow")
-
-    if prev_active and prev_active != uuid:
-        try:
-            _kwin_activate(prev_active)
-        except ToolError:
-            pass
-
-    return img
 
 
 def _list_windows() -> str:
@@ -667,7 +639,14 @@ def _send_mouse(
             _kwin_activate(uuid)
             time.sleep(0.3)
 
-        portal.pointer_move(float(x), float(y))
+        # Apply coordinate offset from last screenshot metadata
+        if _last_screenshot_meta:
+            meta = _last_screenshot_meta
+            abs_x = meta["origin_x"] + x / meta["scale"]
+            abs_y = meta["origin_y"] + y / meta["scale"]
+        else:
+            abs_x, abs_y = float(x), float(y)
+        portal.pointer_move(abs_x, abs_y)
         time.sleep(0.05)
 
         if action == "move":
@@ -773,11 +752,11 @@ def set_text(window: str, element: str, text: str) -> str:
 
 
 def connect_portal() -> str:
-    """Establish a portal session for screen capture and input control.
+    """Establish a portal session for input control.
 
     Triggers a one-time KDE authorization dialog. Once approved, all subsequent
-    screenshot() and send_input(mode='mouse') calls use the portal for reliable
-    absolute positioning and fast frame capture.
+    send_input(mode='mouse') calls use the portal for reliable absolute
+    pointer positioning.
     """
     portal = _get_portal()
     if portal.is_connected:
@@ -792,14 +771,65 @@ def connect_portal() -> str:
 
 
 def screenshot(
-    target: Literal["desktop", "window"] = "desktop", window: str | None = None
-) -> Image:
-    """Capture the desktop or a specific window as a compressed JPEG."""
+    target: Literal["desktop", "window", "monitor"] = "window",
+    window: str | None = None,
+    monitor: str | None = None,
+) -> list:
+    """Capture the desktop, a window, or a monitor as a compressed JPEG.
+
+    Returns [Image, metadata_text]. The metadata text includes pixel
+    coordinates and origin so that send_input(mode='mouse') can map
+    image coordinates to absolute screen coordinates.
+    """
+    global _last_screenshot_meta
+
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = int(time.time() * 1000)
+
     if target == "window":
-        if not window:
-            raise ToolError("'window' is required for target='window'.")
-        return _screenshot_window(window)
-    return _screenshot_desktop()
+        if window:
+            uuid = _resolve_window(window)
+            _kwin_activate(uuid)
+            time.sleep(0.4)
+        jpeg_bytes, meta = capture_active_window()
+        jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
+        jpg_path.write_bytes(jpeg_bytes)
+        _last_screenshot_meta = meta
+        caption = meta.get("caption", "Active Window")
+        w = meta.get("width", "?")
+        h = meta.get("height", "?")
+        ox = meta.get("origin_x", 0)
+        oy = meta.get("origin_y", 0)
+        scale = meta.get("scale", 1.0)
+        info = (
+            f'Screenshot: "{caption}" ({w}x{h})\n'
+            f"Coordinates: origin=({ox}, {oy}), scale={scale}\n"
+            f"Use pixel coordinates from this image with send_input(mode=\"mouse\")."
+        )
+        return [Image(path=str(jpg_path)), info]
+
+    if target == "monitor":
+        jpeg_bytes, meta = capture_screen(monitor)
+        jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
+        jpg_path.write_bytes(jpeg_bytes)
+        _last_screenshot_meta = meta
+        mon_name = meta.get("monitor", monitor or "unknown")
+        w = meta.get("width", "?")
+        h = meta.get("height", "?")
+        ox = meta.get("origin_x", 0)
+        oy = meta.get("origin_y", 0)
+        scale = meta.get("scale", 1.0)
+        info = (
+            f'Screenshot: monitor "{mon_name}" ({w}x{h})\n'
+            f"Coordinates: origin=({ox}, {oy}), scale={scale}\n"
+            f"Use pixel coordinates from this image with send_input(mode=\"mouse\")."
+        )
+        return [Image(path=str(jpg_path)), info]
+
+    # target == "desktop" — full desktop via Spectacle
+    _last_screenshot_meta = None
+    img = _screenshot_desktop()
+    return [img, "Screenshot: full desktop\nNo coordinate mapping available for full desktop capture."]
 
 
 def manage_windows(

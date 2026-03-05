@@ -1,4 +1,3 @@
-import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,16 +6,21 @@ from fastmcp.utilities.types import Image
 
 from bazzite_mcp.runner import CommandResult, ToolError
 from bazzite_mcp.tools.desktop import (
+    _last_screenshot_meta,
     _screenshot_desktop,
     _send_mouse,
     connect_portal,
     screenshot,
 )
+import bazzite_mcp.tools.desktop as desktop_mod
+
+
+# --- _screenshot_desktop (Spectacle fullscreen fallback) ---
 
 
 @patch("bazzite_mcp.tools.desktop.shutil.which")
 @patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_returns_image_with_jpeg(
+def test_screenshot_desktop_returns_image_with_jpeg(
     mock_run: MagicMock, mock_which: MagicMock
 ) -> None:
     mock_which.return_value = "/usr/bin/spectacle"
@@ -30,20 +34,18 @@ def test_screenshot_returns_image_with_jpeg(
 
 @patch("bazzite_mcp.tools.desktop.shutil.which")
 @patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_calls_spectacle_then_magick(
+def test_screenshot_desktop_calls_spectacle_fullscreen(
     mock_run: MagicMock, mock_which: MagicMock
 ) -> None:
     mock_which.return_value = "/usr/bin/spectacle"
     mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
     _screenshot_desktop()
     commands = [c[0][0] for c in mock_run.call_args_list]
-    assert any("spectacle" in cmd for cmd in commands)
-    assert any("magick" in cmd for cmd in commands)
-    assert not any("-resize 5120x" in cmd for cmd in commands)
+    assert any("spectacle" in cmd and "--fullscreen" in cmd for cmd in commands)
 
 
 @patch("bazzite_mcp.tools.desktop.shutil.which")
-def test_screenshot_raises_when_spectacle_missing(mock_which: MagicMock) -> None:
+def test_screenshot_desktop_raises_when_spectacle_missing(mock_which: MagicMock) -> None:
     mock_which.return_value = None
     try:
         _screenshot_desktop()
@@ -52,59 +54,120 @@ def test_screenshot_raises_when_spectacle_missing(mock_which: MagicMock) -> None
         assert "spectacle" in str(e).lower()
 
 
-@patch("bazzite_mcp.tools.desktop.shutil.which")
-@patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_falls_back_to_png_without_magick(
-    mock_run: MagicMock, mock_which: MagicMock
+# --- screenshot() dispatcher with KWin screenshot module ---
+
+
+@patch("bazzite_mcp.tools.desktop.capture_active_window")
+def test_screenshot_window_default_captures_active(mock_capture: MagicMock) -> None:
+    """screenshot(target='window') without window arg captures active window."""
+    mock_capture.return_value = (
+        b"\xff\xd8fake_jpeg",
+        {"origin_x": 100, "origin_y": 50, "scale": 1.0, "width": 800, "height": 600, "caption": "Test Window"},
+    )
+    result = screenshot(target="window")
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert isinstance(result[0], Image)
+    assert "Test Window" in result[1]
+    assert "(800x600)" in result[1]
+    mock_capture.assert_called_once()
+
+
+@patch("bazzite_mcp.tools.desktop._kwin_activate")
+@patch("bazzite_mcp.tools.desktop._resolve_window")
+@patch("bazzite_mcp.tools.desktop.capture_active_window")
+def test_screenshot_window_with_name_activates_first(
+    mock_capture: MagicMock, mock_resolve: MagicMock, mock_activate: MagicMock
 ) -> None:
-    def which_side_effect(name: str) -> str | None:
-        return "/usr/bin/spectacle" if name == "spectacle" else None
+    """screenshot(target='window', window='brave') activates it first."""
+    mock_resolve.return_value = "some-uuid"
+    mock_capture.return_value = (
+        b"\xff\xd8fake_jpeg",
+        {"origin_x": 200, "origin_y": 100, "scale": 1.5, "width": 1200, "height": 900, "caption": "Brave"},
+    )
+    result = screenshot(target="window", window="brave")
+    mock_resolve.assert_called_once_with("brave")
+    mock_activate.assert_called_once_with("some-uuid")
+    assert isinstance(result[0], Image)
+    assert "Brave" in result[1]
 
-    mock_which.side_effect = which_side_effect
-    mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    result = _screenshot_desktop()
-    assert isinstance(result, Image)
-    assert str(result.path).endswith(".png")
+
+@patch("bazzite_mcp.tools.desktop.capture_screen")
+def test_screenshot_monitor(mock_capture: MagicMock) -> None:
+    """screenshot(target='monitor') uses capture_screen."""
+    mock_capture.return_value = (
+        b"\xff\xd8fake_jpeg",
+        {"monitor": "HDMI-A-1", "origin_x": 0, "origin_y": 0, "width": 2560, "height": 1440, "scale": 1.0},
+    )
+    result = screenshot(target="monitor", monitor="HDMI-A-1")
+    mock_capture.assert_called_once_with("HDMI-A-1")
+    assert isinstance(result, list)
+    assert "HDMI-A-1" in result[1]
 
 
-# --- Dispatcher tests ---
+@patch("bazzite_mcp.tools.desktop._screenshot_desktop")
+def test_screenshot_desktop_target(mock_desktop: MagicMock) -> None:
+    """screenshot(target='desktop') falls back to Spectacle fullscreen."""
+    mock_desktop.return_value = Image(path="/tmp/bazzite-mcp/test.jpg")
+    result = screenshot(target="desktop")
+    mock_desktop.assert_called_once()
+    assert isinstance(result, list)
+    assert "full desktop" in result[1]
 
 
-def test_screenshot_dispatcher_window_requires_window() -> None:
-    with pytest.raises(ToolError, match="window"):
-        screenshot(target="window")
+# --- screenshot sets _last_screenshot_meta ---
+
+
+@patch("bazzite_mcp.tools.desktop.capture_active_window")
+def test_screenshot_sets_last_meta(mock_capture: MagicMock) -> None:
+    """screenshot(target='window') sets _last_screenshot_meta for send_input."""
+    meta = {"origin_x": 200, "origin_y": 100, "scale": 1.5, "width": 1200, "height": 900, "caption": "Test"}
+    mock_capture.return_value = (b"\xff\xd8fake", meta)
+    screenshot(target="window")
+    assert desktop_mod._last_screenshot_meta == meta
+
+
+# --- Coordinate offset in send_input ---
+
+
+@patch("bazzite_mcp.tools.desktop._get_portal")
+def test_send_mouse_applies_coordinate_offset(mock_get_portal: MagicMock) -> None:
+    """When _last_screenshot_meta is set, mouse coordinates are offset."""
+    portal = MagicMock()
+    portal.is_connected = True
+    portal.pointer_move.return_value = {"ok": True}
+    portal.click.return_value = {"ok": True}
+    mock_get_portal.return_value = portal
+
+    # Set screenshot metadata: window at (200, 100) with scale 2.0
+    desktop_mod._last_screenshot_meta = {
+        "origin_x": 200,
+        "origin_y": 100,
+        "scale": 2.0,
+    }
+    try:
+        _send_mouse("click", 400, 300)
+        # Expected: abs_x = 200 + 400/2.0 = 400.0, abs_y = 100 + 300/2.0 = 250.0
+        portal.pointer_move.assert_called_once_with(400.0, 250.0)
+    finally:
+        desktop_mod._last_screenshot_meta = None
+
+
+@patch("bazzite_mcp.tools.desktop._get_portal")
+def test_send_mouse_no_offset_when_no_meta(mock_get_portal: MagicMock) -> None:
+    """When _last_screenshot_meta is None, raw coordinates are used."""
+    portal = MagicMock()
+    portal.is_connected = True
+    portal.pointer_move.return_value = {"ok": True}
+    portal.click.return_value = {"ok": True}
+    mock_get_portal.return_value = portal
+
+    desktop_mod._last_screenshot_meta = None
+    _send_mouse("click", 500, 300)
+    portal.pointer_move.assert_called_once_with(500.0, 300.0)
 
 
 # --- Portal integration tests ---
-
-
-@patch("bazzite_mcp.tools.desktop._get_portal")
-def test_screenshot_uses_portal_when_connected(mock_get_portal: MagicMock) -> None:
-    fake_jpeg = base64.b64encode(b"\xff\xd8fake_jpeg_data").decode()
-    portal = MagicMock()
-    portal.is_connected = True
-    portal.grab_frame.return_value = {"jpeg_b64": fake_jpeg}
-    mock_get_portal.return_value = portal
-    result = _screenshot_desktop()
-    portal.grab_frame.assert_called_once()
-    assert isinstance(result, Image)
-
-
-@patch("bazzite_mcp.tools.desktop._get_portal")
-@patch("bazzite_mcp.tools.desktop.shutil.which")
-@patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_falls_back_to_spectacle(
-    mock_run: MagicMock, mock_which: MagicMock, mock_get_portal: MagicMock
-) -> None:
-    portal = MagicMock()
-    portal.is_connected = False
-    mock_get_portal.return_value = portal
-    mock_which.return_value = "/usr/bin/spectacle"
-    mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    result = _screenshot_desktop()
-    assert isinstance(result, Image)
-    commands = [c[0][0] for c in mock_run.call_args_list]
-    assert any("spectacle" in cmd for cmd in commands)
 
 
 @patch("bazzite_mcp.tools.desktop._get_portal")
@@ -114,6 +177,7 @@ def test_send_mouse_uses_portal_when_connected(mock_get_portal: MagicMock) -> No
     portal.pointer_move.return_value = {"ok": True}
     portal.click.return_value = {"ok": True}
     mock_get_portal.return_value = portal
+    desktop_mod._last_screenshot_meta = None
     result = _send_mouse("click", 500, 300)
     portal.pointer_move.assert_called_once_with(500.0, 300.0)
     portal.click.assert_called_once()

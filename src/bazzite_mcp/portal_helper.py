@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Portal helper subprocess for RemoteDesktop + ScreenCast via D-Bus.
+"""Portal helper subprocess for RemoteDesktop via D-Bus.
 
 Long-lived process: reads JSON commands from stdin, writes JSON responses
 to stdout (one object per line).  Executed by system Python which has
-PyGObject / GStreamer / dbus-python bindings.
+PyGObject / dbus-python bindings.
 
 Protocol
 --------
@@ -18,18 +18,13 @@ Commands (one JSON object per line on stdin):
   {"op": "pointer_move", "stream": <int>, "x": <float>, "y": <float>}
   {"op": "pointer_click", "button": 272, "action": "click"|"press"|"release"}
   {"op": "key_press", "keysym": <int>, "is_keysym": true}
-  {"op": "grab_frame"}
-      Capture a single JPEG frame from the PipeWire stream.
-      Returns {"ok": true, "jpeg_b64": "..."}.
 
   {"op": "close"}
       Tear down session and exit.
 """
 from __future__ import annotations
 
-import base64
 import json
-import os
 import sys
 import traceback
 from typing import Any
@@ -38,13 +33,9 @@ import dbus
 import dbus.mainloop.glib
 import gi
 
-gi.require_version("Gst", "1.0")
-gi.require_version("GstApp", "1.0")
-
-from gi.repository import GLib, Gst, GstApp  # noqa: E402
+from gi.repository import GLib  # noqa: E402
 
 dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-Gst.init(None)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -63,7 +54,6 @@ _REQ_IFACE = "org.freedesktop.portal.Request"
 _bus: dbus.SessionBus | None = None
 _session_path: str | None = None
 _streams: list[dict] | None = None
-_pw_fd: int | None = None  # PipeWire fd (dup'd for reuse)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +89,7 @@ def _create_session() -> dict[str, Any]:
       CreateSession → SelectDevices → SelectSources → Start
     Uses a GLib main loop to wait for each async Response signal.
     """
-    global _bus, _session_path, _streams, _pw_fd
+    global _bus, _session_path, _streams
 
     _bus = dbus.SessionBus()
     portal = _bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
@@ -112,7 +102,7 @@ def _create_session() -> dict[str, Any]:
     step = [0]
 
     def on_response(response_code, results):
-        global _session_path, _streams, _pw_fd
+        global _session_path, _streams
         nonlocal result
         step[0] += 1
 
@@ -161,7 +151,7 @@ def _create_session() -> dict[str, Any]:
                 rd.Start(dbus.ObjectPath(session_h), "", {"handle_token": "start_rd"})
 
             elif step[0] == 4:
-                # Start done → extract streams and open PipeWire fd
+                # Start done → extract streams
                 session_h = f"/org/freedesktop/portal/desktop/session/{sender}/portal_sess"
 
                 raw_streams: list[dict] = []
@@ -183,24 +173,6 @@ def _create_session() -> dict[str, Any]:
 
                 _session_path = session_h
                 _streams = raw_streams
-
-                # Get PipeWire fd via ScreenCast.OpenPipeWireRemote
-                pw_fd_result = sc.OpenPipeWireRemote(
-                    dbus.ObjectPath(session_h), dbus.Dictionary({}, signature="sv"),
-                )
-                # dbus-python returns a dbus.types.UnixFd; call take() to own the fd
-                if hasattr(pw_fd_result, "take"):
-                    pw_fd_raw = pw_fd_result.take()
-                else:
-                    pw_fd_raw = int(pw_fd_result)
-
-                if pw_fd_raw < 0:
-                    result = {"error": f"OpenPipeWireRemote returned {pw_fd_raw}"}
-                    loop.quit()
-                    return
-
-                _pw_fd = os.dup(pw_fd_raw)
-                os.close(pw_fd_raw)
 
                 result = {"ok": True, "streams": raw_streams}
                 loop.quit()
@@ -292,72 +264,12 @@ def _key_press(keysym: int, is_keysym: bool = True) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Frame capture via GStreamer
-# ---------------------------------------------------------------------------
-
-
-def _grab_frame() -> dict[str, Any]:
-    """Capture a single JPEG frame from the PipeWire stream."""
-    if _session_path is None or _pw_fd is None or not _streams:
-        return {"error": "No active session or no streams"}
-
-    node_id = _streams[0]["node_id"]
-
-    # Dup the fd — GStreamer's pipewiresrc will close it
-    fd_for_gst = os.dup(_pw_fd)
-
-    pipeline_str = (
-        f"pipewiresrc fd={fd_for_gst} path={node_id} do-timestamp=true ! "
-        f"videoconvert ! videoscale ! video/x-raw,width=2560 ! "
-        f"jpegenc quality=85 ! appsink name=sink max-buffers=1 drop=true"
-    )
-
-    pipeline = Gst.parse_launch(pipeline_str)
-    if pipeline is None:
-        os.close(fd_for_gst)
-        return {"error": "Failed to create GStreamer pipeline"}
-
-    sink = pipeline.get_by_name("sink")
-    if sink is None:
-        os.close(fd_for_gst)
-        return {"error": "Failed to find appsink in pipeline"}
-
-    sink.set_property("emit-signals", False)
-    pipeline.set_state(Gst.State.PLAYING)
-
-    sample = None
-    try:
-        # Use action signal — get_by_name returns Gst.Element, not GstApp.AppSink
-        sample = sink.emit("try-pull-sample", 5 * Gst.SECOND)
-    except Exception as exc:
-        pipeline.set_state(Gst.State.NULL)
-        return {"error": f"pull_sample failed: {exc}"}
-
-    if sample is None:
-        pipeline.set_state(Gst.State.NULL)
-        return {"error": "No frame received within timeout"}
-
-    buf = sample.get_buffer()
-    ok, map_info = buf.map(Gst.MapFlags.READ)
-    if not ok:
-        pipeline.set_state(Gst.State.NULL)
-        return {"error": "Failed to map GStreamer buffer"}
-
-    jpeg_bytes = bytes(map_info.data)
-    buf.unmap(map_info)
-    pipeline.set_state(Gst.State.NULL)
-
-    jpeg_b64 = base64.b64encode(jpeg_bytes).decode("ascii")
-    return {"ok": True, "jpeg_b64": jpeg_b64}
-
-
-# ---------------------------------------------------------------------------
 # Session teardown
 # ---------------------------------------------------------------------------
 
 
 def _close_session() -> dict[str, Any]:
-    global _session_path, _pw_fd, _streams, _bus
+    global _session_path, _streams, _bus
     if _session_path is not None and _bus is not None:
         try:
             session_obj = _bus.get_object(_PORTAL_BUS, _session_path)
@@ -366,12 +278,6 @@ def _close_session() -> dict[str, Any]:
         except Exception:
             pass
         _session_path = None
-    if _pw_fd is not None:
-        try:
-            os.close(_pw_fd)
-        except OSError:
-            pass
-        _pw_fd = None
     _streams = None
     return {"ok": True}
 
@@ -414,8 +320,6 @@ def main() -> None:
                     keysym=int(cmd["keysym"]),
                     is_keysym=bool(cmd.get("is_keysym", True)),
                 )
-            elif op == "grab_frame":
-                result = _grab_frame()
             elif op == "close":
                 result = _close_session()
                 _respond(result)

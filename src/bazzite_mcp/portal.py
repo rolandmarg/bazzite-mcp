@@ -83,11 +83,6 @@ class PortalClient:
             "is_keysym": is_keysym,
         })
 
-    def grab_frame(self) -> dict:
-        """Send grab_frame command, returns dict with jpeg_b64."""
-        self._require_connected()
-        return self._send({"op": "grab_frame"})
-
     def close(self) -> None:
         """Send close command and terminate subprocess."""
         if self._proc and self._proc.poll() is None:
