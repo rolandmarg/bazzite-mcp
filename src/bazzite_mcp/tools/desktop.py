@@ -30,8 +30,8 @@ _SYSTEM_PYTHON = "/usr/bin/python3"
 def _kwin_get_windows() -> list[dict]:
     """List windows via KWin WindowsRunner DBus interface."""
     result = run_command(
-        'gdbus call --session --dest org.kde.KWin '
-        '--object-path /WindowsRunner '
+        "gdbus call --session --dest org.kde.KWin "
+        "--object-path /WindowsRunner "
         '--method org.kde.krunner1.Match " "'
     )
     if result.returncode != 0:
@@ -50,18 +50,20 @@ def _kwin_get_windows() -> list[dict]:
             continue
         seen.add(uuid)
         info = _kwin_get_window_info(uuid)
-        windows.append({
-            "id": uuid,
-            "title": title,
-            "class": wclass or info.get("resourceClass", ""),
-            "x": info.get("x"),
-            "y": info.get("y"),
-            "width": info.get("width"),
-            "height": info.get("height"),
-            "minimized": info.get("minimized", False),
-            "fullscreen": info.get("fullscreen", False),
-            "desktop_file": info.get("desktopFile", ""),
-        })
+        windows.append(
+            {
+                "id": uuid,
+                "title": title,
+                "class": wclass or info.get("resourceClass", ""),
+                "x": info.get("x"),
+                "y": info.get("y"),
+                "width": info.get("width"),
+                "height": info.get("height"),
+                "minimized": info.get("minimized", False),
+                "fullscreen": info.get("fullscreen", False),
+                "desktop_file": info.get("desktopFile", ""),
+            }
+        )
     return windows
 
 
@@ -91,9 +93,7 @@ def _kwin_get_window_info(uuid: str) -> dict:
 
 def _kwin_get_active_uuid() -> str | None:
     """Get the UUID of the currently active window."""
-    result = run_command(
-        "qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo"
-    )
+    result = run_command("qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo")
     if result.returncode != 0:
         return None
     for line in result.stdout.splitlines():
@@ -106,8 +106,7 @@ def _kwin_get_active_uuid() -> str | None:
 def _kwin_activate(uuid: str) -> None:
     """Activate a window by UUID via KWin WindowsRunner."""
     result = run_command(
-        f"qdbus org.kde.KWin /WindowsRunner "
-        f"org.kde.krunner1.Run '0_{{{uuid}}}' ''"
+        f"qdbus org.kde.KWin /WindowsRunner org.kde.krunner1.Run '0_{{{uuid}}}' ''"
     )
     if result.returncode != 0:
         raise ToolError(f"Failed to activate window {uuid}: {result.stderr}")
@@ -151,7 +150,7 @@ def _require_spectacle() -> None:
         )
 
 
-def _capture_and_compress(spectacle_args: str) -> Image:
+def _capture_and_compress(spectacle_args: str, max_width: int | None = None) -> Image:
     """Run spectacle, compress to JPEG, return inline MCP Image."""
     _require_spectacle()
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -167,9 +166,8 @@ def _capture_and_compress(spectacle_args: str) -> Image:
     # Compress to JPEG if ImageMagick available
     if shutil.which("magick"):
         jpg_path = png_path.with_suffix(".jpg")
-        conv = run_command(
-            f"magick {png_path} -resize 5120x -quality 75 {jpg_path}"
-        )
+        resize_arg = f"-resize {max_width}x " if max_width else ""
+        conv = run_command(f"magick {png_path} {resize_arg}-quality 75 {jpg_path}")
         if conv.returncode == 0:
             png_path.unlink(missing_ok=True)
             return Image(path=str(jpg_path))
@@ -470,6 +468,7 @@ def _ensure_ydotoold() -> str:
     if YDOTOOL_SOCKET.exists():
         try:
             import socket as sock_mod
+
             s = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
             s.settimeout(1)
             s.connect(sock)
@@ -576,9 +575,7 @@ def _send_key(key: str, window: str | None = None) -> str:
         _kwin_activate(uuid)
         time.sleep(0.3)
 
-    result = run_command(
-        f"YDOTOOL_SOCKET={sock} ydotool key {_shell_quote(key)}"
-    )
+    result = run_command(f"YDOTOOL_SOCKET={sock} ydotool key {_shell_quote(key)}")
     if result.returncode != 0:
         raise ToolError(f"ydotool key failed: {result.stderr}")
 
@@ -614,7 +611,9 @@ def _send_mouse(
         return f"Moved mouse to ({x}, {y})"
 
     if action == "doubleclick":
-        click_cmd = f"YDOTOOL_SOCKET={sock} ydotool click --repeat 2 --next-delay 80 {btn_code}"
+        click_cmd = (
+            f"YDOTOOL_SOCKET={sock} ydotool click --repeat 2 --next-delay 80 {btn_code}"
+        )
     elif action == "rightclick":
         click_cmd = f"YDOTOOL_SOCKET={sock} ydotool click 0xC1"
     else:
@@ -639,12 +638,14 @@ def interact(
     action: str = "Press",
 ) -> str:
     """Perform an action on a UI element via AT-SPI accessibility API."""
-    result = _atspi_call({
-        "op": "do_action",
-        "app": window,
-        "element": element,
-        "action": action,
-    })
+    result = _atspi_call(
+        {
+            "op": "do_action",
+            "app": window,
+            "element": element,
+            "action": action,
+        }
+    )
 
     if result.get("error"):
         raise ToolError(result["error"])
@@ -661,19 +662,21 @@ def interact(
 
 def set_text(window: str, element: str, text: str) -> str:
     """Set text content of an editable field via AT-SPI."""
-    result = _atspi_call({
-        "op": "set_text",
-        "app": window,
-        "element": element,
-        "text": text,
-    })
+    result = _atspi_call(
+        {
+            "op": "set_text",
+            "app": window,
+            "element": element,
+            "text": text,
+        }
+    )
 
     if result.get("error"):
         raise ToolError(result["error"])
 
     if result.get("found") and result.get("set"):
         el = result.get("element", {})
-        return f"Set text on {el.get('role', '?')}: \"{el.get('name', element)}\""
+        return f'Set text on {el.get("role", "?")}: "{el.get("name", element)}"'
 
     raise ToolError(f"Could not set text on element '{element}'.")
 
@@ -683,7 +686,9 @@ def set_text(window: str, element: str, text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def screenshot(target: Literal["desktop", "window"] = "desktop", window: str | None = None) -> Image:
+def screenshot(
+    target: Literal["desktop", "window"] = "desktop", window: str | None = None
+) -> Image:
     """Capture the desktop or a specific window as a compressed JPEG."""
     if target == "window":
         if not window:
