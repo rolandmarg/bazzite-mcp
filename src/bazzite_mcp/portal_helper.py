@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Portal helper subprocess for RemoteDesktop + ScreenCast via libportal.
+"""Portal helper subprocess for RemoteDesktop + ScreenCast via D-Bus.
 
 Long-lived process: reads JSON commands from stdin, writes JSON responses
 to stdout (one object per line).  Executed by system Python which has
-PyGObject / GStreamer / libportal bindings.
+PyGObject / GStreamer / dbus-python bindings.
 
 Protocol
 --------
@@ -34,22 +34,34 @@ import sys
 import traceback
 from typing import Any
 
+import dbus
+import dbus.mainloop.glib
 import gi
 
 gi.require_version("Gst", "1.0")
-gi.require_version("Xdp", "1.0")
+gi.require_version("GstApp", "1.0")
 
-from gi.repository import GLib, Gst, Xdp  # noqa: E402
+from gi.repository import GLib, Gst, GstApp  # noqa: E402
 
+dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 Gst.init(None)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_PORTAL_BUS = "org.freedesktop.portal.Desktop"
+_PORTAL_PATH = "/org/freedesktop/portal/desktop"
+_RD_IFACE = "org.freedesktop.portal.RemoteDesktop"
+_SC_IFACE = "org.freedesktop.portal.ScreenCast"
+_REQ_IFACE = "org.freedesktop.portal.Request"
 
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
 
-_portal: Xdp.Portal | None = None
-_session: Xdp.Session | None = None
-_loop: GLib.MainLoop | None = None
+_bus: dbus.SessionBus | None = None
+_session_path: str | None = None
 _streams: list[dict] | None = None
 _pw_fd: int | None = None  # PipeWire fd (dup'd for reuse)
 
@@ -69,121 +81,213 @@ def _error(msg: str) -> None:
     _respond({"error": msg})
 
 
+def _sender_token() -> str:
+    """D-Bus sender name munged for portal handle paths."""
+    assert _bus is not None
+    return _bus.get_unique_name().replace(".", "_").lstrip(":")
+
+
 # ---------------------------------------------------------------------------
-# Session creation (async via GLib main loop)
+# Session creation via D-Bus (step-by-step portal protocol)
 # ---------------------------------------------------------------------------
 
 
 def _create_session() -> dict[str, Any]:
     """Create a combined RemoteDesktop+ScreenCast session.
 
-    Runs a temporary GLib main loop until the async callback fires.
-    Returns a result dict.
+    Walks through the full portal handshake:
+      CreateSession → SelectDevices → SelectSources → Start
+    Uses a GLib main loop to wait for each async Response signal.
     """
-    global _portal, _session, _streams, _pw_fd
+    global _bus, _session_path, _streams, _pw_fd
 
-    _portal = Xdp.Portal()
-    result: dict[str, Any] = {}
+    _bus = dbus.SessionBus()
+    portal = _bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
+    rd = dbus.Interface(portal, _RD_IFACE)
+    sc = dbus.Interface(portal, _SC_IFACE)
+
+    sender = _sender_token()
     loop = GLib.MainLoop()
+    result: dict[str, Any] = {}
+    step = [0]
 
-    def _on_session_created(portal: Xdp.Portal, async_result: Any, _user_data: Any) -> None:
+    def on_response(response_code, results):
+        global _session_path, _streams, _pw_fd
         nonlocal result
+        step[0] += 1
+
+        if response_code != 0:
+            result = {"error": f"Portal denied at step {step[0]} (code={response_code})"}
+            loop.quit()
+            return
+
         try:
-            session = portal.create_remote_desktop_session_full_finish(async_result)
-            if session is None:
-                result = {"error": "Session creation returned None (user denied?)"}
+            if step[0] == 1:
+                # CreateSession done → SelectDevices
+                session_h = str(results.get("session_handle", ""))
+                _bus.add_signal_receiver(
+                    on_response, "Response", _REQ_IFACE, _PORTAL_BUS,
+                    f"/org/freedesktop/portal/desktop/request/{sender}/sel_dev",
+                )
+                rd.SelectDevices(
+                    dbus.ObjectPath(session_h),
+                    {"handle_token": "sel_dev", "types": dbus.UInt32(3)},
+                )
+
+            elif step[0] == 2:
+                # SelectDevices done → SelectSources (ScreenCast on RD session)
+                session_h = f"/org/freedesktop/portal/desktop/session/{sender}/portal_sess"
+                _bus.add_signal_receiver(
+                    on_response, "Response", _REQ_IFACE, _PORTAL_BUS,
+                    f"/org/freedesktop/portal/desktop/request/{sender}/sel_src",
+                )
+                sc.SelectSources(
+                    dbus.ObjectPath(session_h),
+                    {
+                        "handle_token": "sel_src",
+                        "types": dbus.UInt32(1),       # MONITOR
+                        "cursor_mode": dbus.UInt32(2),  # EMBEDDED
+                        "multiple": False,
+                    },
+                )
+
+            elif step[0] == 3:
+                # SelectSources done → Start (triggers user dialog)
+                session_h = f"/org/freedesktop/portal/desktop/session/{sender}/portal_sess"
+                _bus.add_signal_receiver(
+                    on_response, "Response", _REQ_IFACE, _PORTAL_BUS,
+                    f"/org/freedesktop/portal/desktop/request/{sender}/start_rd",
+                )
+                rd.Start(dbus.ObjectPath(session_h), "", {"handle_token": "start_rd"})
+
+            elif step[0] == 4:
+                # Start done → extract streams and open PipeWire fd
+                session_h = f"/org/freedesktop/portal/desktop/session/{sender}/portal_sess"
+
+                raw_streams: list[dict] = []
+                streams_var = results.get("streams", dbus.Array([], signature="(ua{sv})"))
+                for i, entry in enumerate(streams_var):
+                    node_id = int(entry[0])
+                    props = dict(entry[1]) if len(entry) > 1 else {}
+                    s: dict[str, Any] = {"node_id": node_id, "index": i}
+                    if "size" in props:
+                        sz = props["size"]
+                        s["width"] = int(sz[0])
+                        s["height"] = int(sz[1])
+                    raw_streams.append(s)
+
+                if not raw_streams:
+                    result = {"error": "No streams in Start response"}
+                    loop.quit()
+                    return
+
+                _session_path = session_h
+                _streams = raw_streams
+
+                # Get PipeWire fd via ScreenCast.OpenPipeWireRemote
+                pw_fd_result = sc.OpenPipeWireRemote(
+                    dbus.ObjectPath(session_h), dbus.Dictionary({}, signature="sv"),
+                )
+                # dbus-python returns a dbus.types.UnixFd; call take() to own the fd
+                if hasattr(pw_fd_result, "take"):
+                    pw_fd_raw = pw_fd_result.take()
+                else:
+                    pw_fd_raw = int(pw_fd_result)
+
+                if pw_fd_raw < 0:
+                    result = {"error": f"OpenPipeWireRemote returned {pw_fd_raw}"}
+                    loop.quit()
+                    return
+
+                _pw_fd = os.dup(pw_fd_raw)
+                os.close(pw_fd_raw)
+
+                result = {"ok": True, "streams": raw_streams}
                 loop.quit()
-                return
 
-            global _session, _streams, _pw_fd
-            _session = session
-
-            # Parse streams GLib.Variant -> list of dicts
-            streams_variant = session.get_streams()
-            raw_streams: list[dict] = []
-            if streams_variant is not None:
-                n = streams_variant.n_children()
-                for i in range(n):
-                    child = streams_variant.get_child_value(i)
-                    node_id = child.get_child_value(0).get_uint32()
-                    raw_streams.append({"node_id": node_id, "index": i})
-            _streams = raw_streams
-
-            # Get PipeWire fd and dup it (portal may close the original)
-            pw_fd_raw = session.open_pipewire_remote()
-            if pw_fd_raw < 0:
-                result = {"error": f"open_pipewire_remote returned {pw_fd_raw}"}
-                loop.quit()
-                return
-            _pw_fd = os.dup(pw_fd_raw)
-            os.close(pw_fd_raw)
-
-            result = {"ok": True, "streams": raw_streams}
         except Exception as exc:
-            result = {"error": f"Session callback error: {exc}"}
-        finally:
+            result = {"error": f"Step {step[0]} error: {exc}"}
             loop.quit()
 
-    devices = Xdp.DeviceType.POINTER | Xdp.DeviceType.KEYBOARD
-    outputs = Xdp.OutputType.MONITOR
-    flags = Xdp.RemoteDesktopFlags.NONE
-    cursor_mode = Xdp.CursorMode.EMBEDDED
-    persist_mode = Xdp.PersistMode.TRANSIENT
-
-    _portal.create_remote_desktop_session_full(
-        devices,
-        outputs,
-        flags,
-        cursor_mode,
-        persist_mode,
-        None,   # restore_token
-        None,   # cancellable
-        _on_session_created,
-        None,   # user_data
+    # Step 1: CreateSession
+    _bus.add_signal_receiver(
+        on_response, "Response", _REQ_IFACE, _PORTAL_BUS,
+        f"/org/freedesktop/portal/desktop/request/{sender}/create_sess",
     )
+    rd.CreateSession({
+        "session_handle_token": "portal_sess",
+        "handle_token": "create_sess",
+    })
 
+    # 60s timeout for user to approve dialog
+    GLib.timeout_add_seconds(60, lambda: (loop.quit(), False))
     loop.run()
+
+    if not result:
+        result = {"error": "Timed out waiting for portal session"}
+
     return result
 
 
 # ---------------------------------------------------------------------------
-# Input simulation
+# Input simulation via D-Bus
 # ---------------------------------------------------------------------------
 
 
 def _pointer_move(stream: int, x: float, y: float) -> dict[str, Any]:
-    if _session is None:
+    if _bus is None or _session_path is None:
         return {"error": "No active session"}
-    _session.pointer_position(stream, x, y)
+    portal = _bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
+    rd = dbus.Interface(portal, _RD_IFACE)
+    rd.NotifyPointerMotionAbsolute(
+        dbus.ObjectPath(_session_path),
+        dbus.Dictionary({}, signature="sv"),
+        dbus.UInt32(stream),
+        dbus.Double(x),
+        dbus.Double(y),
+    )
     return {"ok": True}
 
 
-def _pointer_click(
-    button: int = 272,
-    action: str = "click",
-) -> dict[str, Any]:
-    if _session is None:
+def _pointer_click(button: int = 272, action: str = "click") -> dict[str, Any]:
+    if _bus is None or _session_path is None:
         return {"error": "No active session"}
-
-    pressed = Xdp.ButtonState.PRESSED
-    released = Xdp.ButtonState.RELEASED
+    portal = _bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
+    rd = dbus.Interface(portal, _RD_IFACE)
+    sp = dbus.ObjectPath(_session_path)
+    opts = dbus.Dictionary({}, signature="sv")
+    btn = dbus.Int32(button)
+    pressed = dbus.UInt32(1)
+    released = dbus.UInt32(0)
 
     if action == "press":
-        _session.pointer_button(button, pressed)
+        rd.NotifyPointerButton(sp, opts, btn, pressed)
     elif action == "release":
-        _session.pointer_button(button, released)
+        rd.NotifyPointerButton(sp, opts, btn, released)
     else:  # "click"
-        _session.pointer_button(button, pressed)
-        _session.pointer_button(button, released)
+        rd.NotifyPointerButton(sp, opts, btn, pressed)
+        rd.NotifyPointerButton(sp, opts, btn, released)
 
     return {"ok": True}
 
 
 def _key_press(keysym: int, is_keysym: bool = True) -> dict[str, Any]:
-    if _session is None:
+    if _bus is None or _session_path is None:
         return {"error": "No active session"}
-    _session.keyboard_key(is_keysym, keysym, Xdp.KeyState.PRESSED)
-    _session.keyboard_key(is_keysym, keysym, Xdp.KeyState.RELEASED)
+    portal = _bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
+    rd = dbus.Interface(portal, _RD_IFACE)
+    sp = dbus.ObjectPath(_session_path)
+    opts = dbus.Dictionary({}, signature="sv")
+    pressed = dbus.UInt32(1)
+    released = dbus.UInt32(0)
+
+    if is_keysym:
+        rd.NotifyKeyboardKeysym(sp, opts, dbus.Int32(keysym), pressed)
+        rd.NotifyKeyboardKeysym(sp, opts, dbus.Int32(keysym), released)
+    else:
+        rd.NotifyKeyboardKeycode(sp, opts, dbus.Int32(keysym), pressed)
+        rd.NotifyKeyboardKeycode(sp, opts, dbus.Int32(keysym), released)
+
     return {"ok": True}
 
 
@@ -194,7 +298,7 @@ def _key_press(keysym: int, is_keysym: bool = True) -> dict[str, Any]:
 
 def _grab_frame() -> dict[str, Any]:
     """Capture a single JPEG frame from the PipeWire stream."""
-    if _session is None or _pw_fd is None or not _streams:
+    if _session_path is None or _pw_fd is None or not _streams:
         return {"error": "No active session or no streams"}
 
     node_id = _streams[0]["node_id"]
@@ -218,15 +322,13 @@ def _grab_frame() -> dict[str, Any]:
         os.close(fd_for_gst)
         return {"error": "Failed to find appsink in pipeline"}
 
-    # Set to emit-signals=False so we use pull-sample
     sink.set_property("emit-signals", False)
-
     pipeline.set_state(Gst.State.PLAYING)
 
-    # Wait up to 5 seconds for a frame
     sample = None
     try:
-        sample = sink.try_pull_sample(5 * Gst.SECOND)
+        # Use action signal — get_by_name returns Gst.Element, not GstApp.AppSink
+        sample = sink.emit("try-pull-sample", 5 * Gst.SECOND)
     except Exception as exc:
         pipeline.set_state(Gst.State.NULL)
         return {"error": f"pull_sample failed: {exc}"}
@@ -255,13 +357,15 @@ def _grab_frame() -> dict[str, Any]:
 
 
 def _close_session() -> dict[str, Any]:
-    global _session, _pw_fd, _streams
-    if _session is not None:
+    global _session_path, _pw_fd, _streams, _bus
+    if _session_path is not None and _bus is not None:
         try:
-            _session.close()
+            session_obj = _bus.get_object(_PORTAL_BUS, _session_path)
+            session_iface = dbus.Interface(session_obj, "org.freedesktop.portal.Session")
+            session_iface.Close()
         except Exception:
             pass
-        _session = None
+        _session_path = None
     if _pw_fd is not None:
         try:
             os.close(_pw_fd)
