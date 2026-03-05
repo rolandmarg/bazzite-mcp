@@ -150,8 +150,11 @@ def _require_spectacle() -> None:
         )
 
 
-def _capture_and_compress(spectacle_args: str, max_width: int | None = None) -> Image:
-    """Run spectacle, compress to JPEG, return inline MCP Image."""
+def _capture_and_compress(spectacle_args: str, max_width: int = 2560) -> Image:
+    """Run spectacle, compress to JPEG, return inline MCP Image.
+
+    max_width caps the output width (only shrinks, never upscales).
+    """
     _require_spectacle()
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = int(time.time())
@@ -166,8 +169,9 @@ def _capture_and_compress(spectacle_args: str, max_width: int | None = None) -> 
     # Compress to JPEG if ImageMagick available
     if shutil.which("magick"):
         jpg_path = png_path.with_suffix(".jpg")
-        resize_arg = f"-resize {max_width}x " if max_width else ""
-        conv = run_command(f"magick {png_path} {resize_arg}-quality 75 {jpg_path}")
+        # ">" flag = only shrink, never upscale
+        resize_arg = f"-resize {max_width}x\\> " if max_width else ""
+        conv = run_command(f"magick {png_path} {resize_arg}-quality 85 {jpg_path}")
         if conv.returncode == 0:
             png_path.unlink(missing_ok=True)
             return Image(path=str(jpg_path))
