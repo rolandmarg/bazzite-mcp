@@ -578,51 +578,6 @@ def _send_key(key: str, window: str | None = None) -> str:
     return f"Sent key {key}{target}"
 
 
-def _ensure_ydotool_flat_accel(sock: str) -> None:
-    """Set flat acceleration profile on ydotool devices so moves are 1:1 pixels."""
-    # Find ydotool pointer devices via KWin InputDeviceManager
-    result = run_command(
-        "gdbus call --session --dest org.kde.KWin "
-        "--object-path /org/kde/KWin/InputDevice "
-        "--method org.kde.KWin.InputDeviceManager.ListPointers"
-    )
-    if result.returncode != 0:
-        return  # best-effort, don't block on failure
-    sysnames = re.findall(r"'(event\d+)'", result.stdout)
-    for sysname in sysnames:
-        path = f"/org/kde/KWin/InputDevice/{sysname}"
-        # Check if this is a ydotool device
-        name_result = run_command(
-            f"gdbus call --session --dest org.kde.KWin "
-            f"--object-path {path} "
-            f"--method org.freedesktop.DBus.Properties.Get "
-            f"org.kde.KWin.InputDevice name"
-        )
-        if "ydotool" not in name_result.stdout:
-            continue
-        # Set flat acceleration profile
-        run_command(
-            f"gdbus call --session --dest org.kde.KWin "
-            f"--object-path {path} "
-            f"--method org.freedesktop.DBus.Properties.Set "
-            f"org.kde.KWin.InputDevice pointerAccelerationProfileFlat "
-            f'"<boolean true>"'
-        )
-
-
-def _ydotool_move_absolute(sock: str, x: int, y: int) -> None:
-    """Move cursor to absolute logical coordinates via two relative ydotool moves."""
-    # ydotool --absolute is broken on Wayland (uses REL device, second move lost).
-    # Workaround: large negative move to origin, then positive move to target.
-    env = f"YDOTOOL_SOCKET={sock}"
-    result = run_command(f"{env} ydotool mousemove -x -32768 -y -32768")
-    if result.returncode != 0:
-        raise ToolError(f"Mouse move to origin failed: {result.stderr}")
-    time.sleep(0.05)
-    result = run_command(f"{env} ydotool mousemove -x {x} -y {y}")
-    if result.returncode != 0:
-        raise ToolError(f"Mouse move to ({x}, {y}) failed: {result.stderr}")
-
 
 def _send_mouse(
     action: str,
@@ -663,9 +618,8 @@ def _send_mouse(
         target = f" on '{window}'" if window else ""
         return f"Mouse {action} at ({x}, {y}){target}"
 
-    # --- Fallback: ydotool (existing code below, unchanged) ---
+    # --- Fallback: ydotool (broken absolute positioning, best-effort) ---
     sock = _ensure_ydotoold()
-    _ensure_ydotool_flat_accel(sock)
 
     if window:
         uuid = _resolve_window(window)
@@ -675,7 +629,8 @@ def _send_mouse(
     button_map = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}
     btn_code = button_map.get(button, "0xC0")
 
-    _ydotool_move_absolute(sock, x, y)
+    env = f"YDOTOOL_SOCKET={sock}"
+    run_command(f"{env} ydotool mousemove --absolute -x {x} -y {y}")
 
     if action == "move":
         return f"Moved mouse to ({x}, {y})"
