@@ -155,7 +155,7 @@ Tools use an action-dispatch pattern — each tool handles multiple related oper
 ### Virtualization
 | Tool | Actions | Description |
 |------|---------|-------------|
-| `manage_vm` | `setup`, `status`, `list`, `create_default`, `start`, `stop`, `delete`, `snapshot_list`, `snapshot_create`, `snapshot_revert` | libvirt/KVM VM setup and hardened lifecycle management |
+| `manage_vm` | `prepare`, `preflight`, `rollback`, `setup`, `status`, `list`, `create_default`, `start`, `stop`, `delete`, `snapshot_list`, `snapshot_create`, `snapshot_revert` | libvirt/KVM VM setup with atomic prepare/rollback and hardened lifecycle management |
 
 ### Gaming
 | Tool | Actions | Description |
