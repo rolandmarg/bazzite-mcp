@@ -46,7 +46,7 @@ Every shell command flows through the same path. No tool calls `subprocess` dire
 
 ```
 src/bazzite_mcp/
-├── server.py            # FastMCP instance, registers 23 tools/resources/prompts
+├── server.py            # FastMCP instance, registers 24 tools/resources/prompts
 ├── runner.py            # run_command(), run_audited()
 ├── guardrails.py        # Allowlist + blocked patterns
 ├── audit.py             # SQLite audit trail
@@ -64,6 +64,7 @@ src/bazzite_mcp/
     ├── system.py        # System info, storage, health checks, snapshots
     ├── settings.py      # Desktop settings (theme, audio, display, power)
     ├── desktop.py       # Screenshots, window management, AT-SPI, input
+    ├── virtualization.py # libvirt/KVM setup, VM lifecycle, snapshots
     ├── gaming.py        # Steam library, ProtonDB reports, MangoHud
     ├── docs.py          # Docs search + crawler + changelog
     └── audit_tools.py   # Audit log query + rollback

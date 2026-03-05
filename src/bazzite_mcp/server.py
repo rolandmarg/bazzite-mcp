@@ -52,8 +52,9 @@ mcp = FastMCP(
         "3. Use query_bazzite_docs to search cached documentation\n"
         "4. Every mutation is audit-logged with rollback support — check audit_log_query to review actions\n"
         "5. For containers: prefer distrobox for dev environments, quadlet for persistent services\n"
-        "6. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing\n"
-        "7. For gaming: use steam_library to find games, game_reports for community optimization data, "
+        "6. For untrusted executables, prefer virtual machines over containers; manage_vm provides safe defaults\n"
+        "7. rpm-ostree install is a LAST RESORT — it can freeze updates and block rebasing\n"
+        "8. For gaming: use steam_library to find games, game_reports for community optimization data, "
         "game_settings to apply MangoHud/launch options. Use hardware_info + game_reports to make "
         "hardware-aware recommendations. Existing manage_service covers GameMode."
     ),

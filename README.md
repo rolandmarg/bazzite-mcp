@@ -2,7 +2,7 @@
 
 MCP server that gives AI agents native awareness and control of [Bazzite OS](https://bazzite.gg/).
 
-Instead of stuffing OS knowledge into static prompt files, bazzite-mcp exposes **23 tools** (via action-dispatch pattern) that AI agents can call to query system state, install packages, manage services, change settings, and more — all following [official Bazzite best practices](https://docs.bazzite.gg/).
+Instead of stuffing OS knowledge into static prompt files, bazzite-mcp exposes **24 tools** (via action-dispatch pattern) that AI agents can call to query system state, install packages, manage services, change settings, and more — all following [official Bazzite best practices](https://docs.bazzite.gg/).
 
 Works with any MCP-compatible client: [Claude Code](https://claude.com/claude-code), [OpenCode](https://github.com/opencode-ai/opencode), Cursor, etc.
 
@@ -12,6 +12,7 @@ Works with any MCP-compatible client: [Claude Code](https://claude.com/claude-co
 - **System settings** — theme, audio output, display config, power profile, gsettings
 - **Services & networking** — systemd, NetworkManager, firewalld, Tailscale
 - **Containers** — Distrobox, Quadlet, Podman
+- **Virtualization** — libvirt/KVM setup, VM lifecycle, snapshots, and hardened defaults
 - **System diagnostics** — hardware info, storage breakdown, security/health checks, journal logs, snapshots
 - **Desktop automation** — screenshots, window management, AT-SPI accessibility interaction, keyboard/mouse input
 - **Gaming** — Steam library, ProtonDB/PCGamingWiki reports, MangoHud settings
@@ -150,6 +151,11 @@ Tools use an action-dispatch pattern — each tool handles multiple related oper
 | `manage_distrobox` | `create`, `list`, `enter`, `stop`, `remove`, `exec`, `export` | Full distrobox lifecycle |
 | `manage_quadlet` | `list`, `create`, `start`, `stop`, `status`, `remove` | Persistent container services |
 | `manage_podman` | `run`, `stop`, `rm`, `pull`, `ps`, `images`, `logs`, `inspect`, `exec` | Podman operations |
+
+### Virtualization
+| Tool | Actions | Description |
+|------|---------|-------------|
+| `manage_vm` | `setup`, `status`, `list`, `create_default`, `start`, `stop`, `delete`, `snapshot_list`, `snapshot_create`, `snapshot_revert` | libvirt/KVM VM setup and hardened lifecycle management |
 
 ### Gaming
 | Tool | Actions | Description |
