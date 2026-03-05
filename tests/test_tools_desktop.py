@@ -4,54 +4,13 @@ import pytest
 
 from fastmcp.utilities.types import Image
 
-from bazzite_mcp.runner import CommandResult, ToolError
 from bazzite_mcp.tools.desktop import (
     _last_screenshot_meta,
-    _screenshot_desktop,
     _send_mouse,
     connect_portal,
     screenshot,
 )
 import bazzite_mcp.tools.desktop as desktop_mod
-
-
-# --- _screenshot_desktop (Spectacle fullscreen fallback) ---
-
-
-@patch("bazzite_mcp.tools.desktop.shutil.which")
-@patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_desktop_returns_image_with_jpeg(
-    mock_run: MagicMock, mock_which: MagicMock
-) -> None:
-    mock_which.return_value = "/usr/bin/spectacle"
-    mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    result = _screenshot_desktop()
-    assert isinstance(result, Image)
-    assert result.path is not None
-    assert str(result.path).endswith(".jpg")
-    assert "/tmp/bazzite-mcp/" in str(result.path)
-
-
-@patch("bazzite_mcp.tools.desktop.shutil.which")
-@patch("bazzite_mcp.tools.desktop.run_command")
-def test_screenshot_desktop_calls_spectacle_fullscreen(
-    mock_run: MagicMock, mock_which: MagicMock
-) -> None:
-    mock_which.return_value = "/usr/bin/spectacle"
-    mock_run.return_value = CommandResult(returncode=0, stdout="", stderr="")
-    _screenshot_desktop()
-    commands = [c[0][0] for c in mock_run.call_args_list]
-    assert any("spectacle" in cmd and "--fullscreen" in cmd for cmd in commands)
-
-
-@patch("bazzite_mcp.tools.desktop.shutil.which")
-def test_screenshot_desktop_raises_when_spectacle_missing(mock_which: MagicMock) -> None:
-    mock_which.return_value = None
-    try:
-        _screenshot_desktop()
-        assert False, "Should have raised"
-    except Exception as e:
-        assert "spectacle" in str(e).lower()
 
 
 # --- screenshot() dispatcher with KWin screenshot module ---
@@ -105,14 +64,17 @@ def test_screenshot_monitor(mock_capture: MagicMock) -> None:
     assert "HDMI-A-1" in result[1]
 
 
-@patch("bazzite_mcp.tools.desktop._screenshot_desktop")
-def test_screenshot_desktop_target(mock_desktop: MagicMock) -> None:
-    """screenshot(target='desktop') falls back to Spectacle fullscreen."""
-    mock_desktop.return_value = Image(path="/tmp/bazzite-mcp/test.jpg")
+@patch("bazzite_mcp.tools.desktop.capture_screen")
+def test_screenshot_desktop_target(mock_capture: MagicMock) -> None:
+    """screenshot(target='desktop') captures focused monitor."""
+    mock_capture.return_value = (
+        b"\xff\xd8fake_jpeg",
+        {"monitor": "HDMI-A-1", "origin_x": 0, "origin_y": 0, "width": 2560, "height": 1440, "scale": 1.0},
+    )
     result = screenshot(target="desktop")
-    mock_desktop.assert_called_once()
+    mock_capture.assert_called_once()
     assert isinstance(result, list)
-    assert "full desktop" in result[1]
+    assert "HDMI-A-1" in result[1]
 
 
 # --- screenshot sets _last_screenshot_meta ---

@@ -103,13 +103,15 @@ def _kwin_get_window_info(uuid: str) -> dict:
 
 def _kwin_get_active_uuid() -> str | None:
     """Get the UUID of the currently active window."""
-    result = run_command("qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo")
+    result = run_command(
+        "gdbus call --session --dest org.kde.KWin "
+        "--object-path /KWin --method org.kde.KWin.queryWindowInfo"
+    )
     if result.returncode != 0:
         return None
-    for line in result.stdout.splitlines():
-        if line.startswith("uuid:"):
-            raw = line.partition(":")[2].strip()
-            return raw.strip("{}")
+    m = re.search(r"'uuid':\s*<'([^']+)'>", result.stdout)
+    if m:
+        return m.group(1).strip("{}")
     return None
 
 
@@ -146,47 +148,6 @@ def _resolve_window(window: str) -> str:
     available = ", ".join(f"{w['title']!r} ({w['class']})" for w in windows)
     raise ToolError(f"No window matching '{window}'. Available: {available}")
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers — screenshots
-# ---------------------------------------------------------------------------
-
-
-def _require_spectacle() -> None:
-    if not shutil.which("spectacle"):
-        raise ToolError(
-            "spectacle is not installed. "
-            "It should be pre-installed on Bazzite KDE — check your image."
-        )
-
-
-def _capture_and_compress(spectacle_args: str, max_width: int = 2560) -> Image:
-    """Run spectacle, compress to JPEG, return inline MCP Image.
-
-    max_width caps the output width (only shrinks, never upscales).
-    """
-    _require_spectacle()
-    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = int(time.time())
-    png_path = SCREENSHOT_DIR / f"capture-{timestamp}.png"
-
-    result = run_command(
-        f"spectacle {spectacle_args} --background --nonotify --output {png_path}"
-    )
-    if result.returncode != 0:
-        raise ToolError(f"Spectacle capture failed: {result.stderr}")
-
-    # Compress to JPEG if ImageMagick available
-    if shutil.which("magick"):
-        jpg_path = png_path.with_suffix(".jpg")
-        # ">" flag = only shrink, never upscale
-        resize_arg = f"-resize {max_width}x\\> " if max_width else ""
-        conv = run_command(f"magick {png_path} {resize_arg}-quality 85 {jpg_path}")
-        if conv.returncode == 0:
-            png_path.unlink(missing_ok=True)
-            return Image(path=str(jpg_path))
-
-    return Image(path=str(png_path))
 
 
 # ---------------------------------------------------------------------------
@@ -515,10 +476,6 @@ def _shell_quote(s: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _screenshot_desktop() -> Image:
-    """Capture the full desktop via Spectacle fullscreen."""
-    return _capture_and_compress("--fullscreen")
-
 
 def _list_windows() -> str:
     """List all open windows with their ID, title, class, geometry, and state."""
@@ -729,7 +686,7 @@ def screenshot(
     target: Literal["desktop", "window", "monitor"] = "window",
     window: str | None = None,
     monitor: str | None = None,
-) -> list:
+):
     """Capture the desktop, a window, or a monitor as a compressed JPEG.
 
     Returns [Image, metadata_text]. The metadata text includes pixel
@@ -781,10 +738,23 @@ def screenshot(
         )
         return [Image(path=str(jpg_path)), info]
 
-    # target == "desktop" — full desktop via Spectacle
-    _last_screenshot_meta = None
-    img = _screenshot_desktop()
-    return [img, "Screenshot: full desktop\nNo coordinate mapping available for full desktop capture."]
+    # target == "desktop" — capture the focused monitor (readable single-monitor shot)
+    jpeg_bytes, meta = capture_screen(monitor)
+    jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
+    jpg_path.write_bytes(jpeg_bytes)
+    _last_screenshot_meta = meta
+    mon_name = meta.get("monitor", monitor or "unknown")
+    w = meta.get("width", "?")
+    h = meta.get("height", "?")
+    ox = meta.get("origin_x", 0)
+    oy = meta.get("origin_y", 0)
+    scale = meta.get("scale", 1.0)
+    info = (
+        f'Screenshot: monitor "{mon_name}" ({w}x{h})\n'
+        f"Coordinates: origin=({ox}, {oy}), scale={scale}\n"
+        f"Use pixel coordinates from this image with send_input(mode=\"mouse\")."
+    )
+    return [Image(path=str(jpg_path)), info]
 
 
 def manage_windows(

@@ -31,20 +31,20 @@ KSCREEN_OUTPUT = (
     "\tRotation: 1\n"
 )
 
-QDBUS_WINDOW_OUTPUT = (
-    "activities: a1719f67-6bac-49d3-a844-c76d5708424a\n"
-    "caption: Hello World - Firefox\n"
-    "clientMachine: \n"
-    "desktopFile: org.mozilla.firefox\n"
-    "fullscreen: false\n"
-    "height: 900\n"
-    "keepAbove: false\n"
-    "minimized: false\n"
-    "resourceClass: firefox\n"
-    "uuid: {abcd1234-5678-9abc-def0-123456789abc}\n"
-    "width: 1200\n"
-    "x: 200\n"
-    "y: 100\n"
+GDBUS_WINDOW_OUTPUT = (
+    "({'activities': <['a1719f67-6bac-49d3-a844-c76d5708424a']>, "
+    "'caption': <'Hello World - Firefox'>, "
+    "'clientMachine': <'localhost'>, "
+    "'desktopFile': <'org.mozilla.firefox'>, "
+    "'fullscreen': <false>, "
+    "'height': <900.0>, "
+    "'keepAbove': <false>, "
+    "'minimized': <false>, "
+    "'resourceClass': <'firefox'>, "
+    "'uuid': <'{abcd1234-5678-9abc-def0-123456789abc}'>, "
+    "'width': <1200.0>, "
+    "'x': <200.0>, "
+    "'y': <100.0>},)\n"
 )
 
 
@@ -85,7 +85,7 @@ def test_get_monitor_info(mock_run: MagicMock) -> None:
 def test_get_active_window_info(mock_run: MagicMock) -> None:
     """Parses qdbus queryWindowInfo output into a dict."""
     mock_run.return_value = CommandResult(
-        returncode=0, stdout=QDBUS_WINDOW_OUTPUT, stderr=""
+        returncode=0, stdout=GDBUS_WINDOW_OUTPUT, stderr=""
     )
 
     info = get_active_window_info()
@@ -104,12 +104,12 @@ def test_get_active_window_info_float_values(mock_run: MagicMock) -> None:
     mock_run.return_value = CommandResult(
         returncode=0,
         stdout=(
-            "caption: Yakuake\n"
-            "uuid: {e88f7a69-84ed-4eec-aaef-4f25bd9575be}\n"
-            "width: 2304\n"
-            "height: 1137.33333333333\n"
-            "x: 2688\n"
-            "y: 169\n"
+            "({'caption': <'Yakuake'>, "
+            "'uuid': <'{e88f7a69-84ed-4eec-aaef-4f25bd9575be}'>, "
+            "'width': <2304.0>, "
+            "'height': <1137.33333333333>, "
+            "'x': <2688.0>, "
+            "'y': <169.0>},)\n"
         ),
         stderr="",
     )
@@ -155,7 +155,7 @@ def test_capture_active_window(mock_run: MagicMock) -> None:
     def side_effect(cmd, **kwargs):
         if "queryWindowInfo" in cmd:
             return CommandResult(
-                returncode=0, stdout=QDBUS_WINDOW_OUTPUT, stderr=""
+                returncode=0, stdout=GDBUS_WINDOW_OUTPUT, stderr=""
             )
         if "kscreen-doctor" in cmd:
             return CommandResult(

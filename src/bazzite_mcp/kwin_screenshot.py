@@ -74,27 +74,30 @@ def get_active_window_info() -> dict:
 
     Returns: {"uuid": "...", "caption": "...", "x": 200, "y": 100,
               "width": 1200, "height": 900}
+
+    Uses gdbus instead of qdbus because qdbus times out on queryWindowInfo.
     """
-    result = run_command("qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo")
+    result = run_command(
+        "gdbus call --session --dest org.kde.KWin "
+        "--object-path /KWin --method org.kde.KWin.queryWindowInfo"
+    )
     if result.returncode != 0:
         raise RuntimeError(f"Failed to query active window: {result.stderr}")
 
     info: dict = {}
-    for line in result.stdout.splitlines():
-        if ": " not in line:
+    raw = result.stdout
+    for key in ("uuid", "caption", "x", "y", "width", "height"):
+        m = re.search(rf"'{key}':\s*<([^>]+)>", raw)
+        if not m:
             continue
-        key, _, value = line.partition(": ")
-        key = key.strip()
-        value = value.strip()
-
+        val = m.group(1).strip("'")
         if key == "uuid":
-            info["uuid"] = value.strip("{}")
+            info["uuid"] = val.strip("{}")
         elif key == "caption":
-            info["caption"] = value
-        elif key in ("x", "y", "width", "height"):
-            # These can be floats (e.g. "1137.33333333333"), truncate to int
+            info["caption"] = val
+        else:
             try:
-                info[key] = int(float(value))
+                info[key] = int(float(val))
             except ValueError:
                 info[key] = 0
 
@@ -141,7 +144,7 @@ def capture_active_window() -> tuple[bytes, dict]:
         raise RuntimeError(f"spectacle capture failed: {result.stderr}")
 
     # Convert PNG to JPEG
-    conv = run_command(f"magick {png_path} -quality 85 {jpg_path}")
+    conv = run_command(f"magick {png_path} -quality 90 {jpg_path}")
     if conv.returncode != 0:
         # Fall back to PNG bytes if magick fails
         jpeg_bytes = png_path.read_bytes()
@@ -184,7 +187,7 @@ def capture_screen(name: str | None = None) -> tuple[bytes, dict]:
         raise RuntimeError(f"spectacle capture failed: {result.stderr}")
 
     # Convert PNG to JPEG
-    conv = run_command(f"magick {png_path} -quality 85 {jpg_path}")
+    conv = run_command(f"magick {png_path} -quality 90 {jpg_path}")
     if conv.returncode != 0:
         jpeg_bytes = png_path.read_bytes()
     else:
