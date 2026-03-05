@@ -13,6 +13,7 @@ from typing import Literal
 from mcp.server.fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
+from bazzite_mcp.portal import PortalClient, get_portal
 from bazzite_mcp.runner import run_command
 
 SCREENSHOT_DIR = Path("/tmp/bazzite-mcp")
@@ -20,6 +21,11 @@ YDOTOOL_SOCKET = SCREENSHOT_DIR / "ydotool.sock"
 
 # System Python is needed for AT-SPI (gi module lives in system site-packages).
 _SYSTEM_PYTHON = "/usr/bin/python3"
+
+
+def _get_portal() -> PortalClient:
+    """Get portal client (lazy, may not be connected)."""
+    return get_portal()
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +513,19 @@ def _shell_quote(s: str) -> str:
 
 def _screenshot_desktop() -> Image:
     """Capture the full desktop."""
+    portal = _get_portal()
+    if portal.is_connected:
+        result = portal.grab_frame()
+        if "jpeg_b64" in result:
+            import base64
+
+            jpeg_data = base64.b64decode(result["jpeg_b64"])
+            SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = int(time.time())
+            jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
+            jpg_path.write_bytes(jpeg_data)
+            return Image(path=str(jpg_path))
+    # Fallback to Spectacle
     return _capture_and_compress("--fullscreen")
 
 
@@ -587,6 +606,52 @@ def _send_key(key: str, window: str | None = None) -> str:
     return f"Sent key {key}{target}"
 
 
+def _ensure_ydotool_flat_accel(sock: str) -> None:
+    """Set flat acceleration profile on ydotool devices so moves are 1:1 pixels."""
+    # Find ydotool pointer devices via KWin InputDeviceManager
+    result = run_command(
+        "gdbus call --session --dest org.kde.KWin "
+        "--object-path /org/kde/KWin/InputDevice "
+        "--method org.kde.KWin.InputDeviceManager.ListPointers"
+    )
+    if result.returncode != 0:
+        return  # best-effort, don't block on failure
+    sysnames = re.findall(r"'(event\d+)'", result.stdout)
+    for sysname in sysnames:
+        path = f"/org/kde/KWin/InputDevice/{sysname}"
+        # Check if this is a ydotool device
+        name_result = run_command(
+            f"gdbus call --session --dest org.kde.KWin "
+            f"--object-path {path} "
+            f"--method org.freedesktop.DBus.Properties.Get "
+            f"org.kde.KWin.InputDevice name"
+        )
+        if "ydotool" not in name_result.stdout:
+            continue
+        # Set flat acceleration profile
+        run_command(
+            f"gdbus call --session --dest org.kde.KWin "
+            f"--object-path {path} "
+            f"--method org.freedesktop.DBus.Properties.Set "
+            f"org.kde.KWin.InputDevice pointerAccelerationProfileFlat "
+            f'"<boolean true>"'
+        )
+
+
+def _ydotool_move_absolute(sock: str, x: int, y: int) -> None:
+    """Move cursor to absolute logical coordinates via two relative ydotool moves."""
+    # ydotool --absolute is broken on Wayland (uses REL device, second move lost).
+    # Workaround: large negative move to origin, then positive move to target.
+    env = f"YDOTOOL_SOCKET={sock}"
+    result = run_command(f"{env} ydotool mousemove -x -32768 -y -32768")
+    if result.returncode != 0:
+        raise ToolError(f"Mouse move to origin failed: {result.stderr}")
+    time.sleep(0.05)
+    result = run_command(f"{env} ydotool mousemove -x {x} -y {y}")
+    if result.returncode != 0:
+        raise ToolError(f"Mouse move to ({x}, {y}) failed: {result.stderr}")
+
+
 def _send_mouse(
     action: str,
     x: int,
@@ -594,8 +659,34 @@ def _send_mouse(
     button: str = "left",
     window: str | None = None,
 ) -> str:
-    """Send mouse input using ydotool (Wayland-native)."""
+    """Send mouse input using portal (preferred) or ydotool (fallback)."""
+    portal = _get_portal()
+    if portal.is_connected:
+        if window:
+            uuid = _resolve_window(window)
+            _kwin_activate(uuid)
+            time.sleep(0.3)
+
+        portal.pointer_move(float(x), float(y))
+        time.sleep(0.05)
+
+        if action == "move":
+            return f"Moved mouse to ({x}, {y})"
+
+        evdev_btn = {"left": 272, "right": 273, "middle": 274}.get(button, 272)
+        if action == "doubleclick":
+            portal.click(evdev_btn)
+            time.sleep(0.08)
+            portal.click(evdev_btn)
+        else:
+            portal.click(evdev_btn, action)
+
+        target = f" on '{window}'" if window else ""
+        return f"Mouse {action} at ({x}, {y}){target}"
+
+    # --- Fallback: ydotool (existing code below, unchanged) ---
     sock = _ensure_ydotoold()
+    _ensure_ydotool_flat_accel(sock)
 
     if window:
         uuid = _resolve_window(window)
@@ -605,11 +696,7 @@ def _send_mouse(
     button_map = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}
     btn_code = button_map.get(button, "0xC0")
 
-    result = run_command(
-        f"YDOTOOL_SOCKET={sock} ydotool mousemove --absolute -x {x} -y {y}"
-    )
-    if result.returncode != 0:
-        raise ToolError(f"Mouse move failed: {result.stderr}")
+    _ydotool_move_absolute(sock, x, y)
 
     if action == "move":
         return f"Moved mouse to ({x}, {y})"
@@ -683,6 +770,20 @@ def set_text(window: str, element: str, text: str) -> str:
         return f'Set text on {el.get("role", "?")}: "{el.get("name", element)}"'
 
     raise ToolError(f"Could not set text on element '{element}'.")
+
+
+def connect_portal() -> str:
+    """Establish a portal session for screen capture and input control.
+
+    Triggers a one-time KDE authorization dialog. Once approved, all subsequent
+    screenshot() and send_input(mode='mouse') calls use the portal for reliable
+    absolute positioning and fast frame capture.
+    """
+    portal = _get_portal()
+    if portal.is_connected:
+        return "Portal session already active."
+    result = portal.connect()
+    return f"Portal session established: {json.dumps(result)}"
 
 
 # ---------------------------------------------------------------------------

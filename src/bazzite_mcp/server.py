@@ -14,6 +14,7 @@ from bazzite_mcp.tools.containers import (
     manage_quadlet,
 )
 from bazzite_mcp.tools.desktop import (
+    connect_portal,
     interact,
     manage_windows,
     screenshot,
@@ -60,7 +61,7 @@ mcp = FastMCP(
     ),
 )
 
-# --- Tools (24 total) ---
+# --- Tools (25 total) ---
 
 # Core
 mcp.tool(ujust)
@@ -80,6 +81,7 @@ mcp.tool(display_config)
 mcp.tool(gsettings)
 
 # Desktop
+mcp.tool(connect_portal)
 mcp.tool(screenshot)
 mcp.tool(manage_windows)
 mcp.tool(interact)
