@@ -165,48 +165,76 @@ def capture_active_window() -> tuple[bytes, dict]:
     return jpeg_bytes, metadata
 
 
+def _pick_monitor(name: str | None) -> tuple[str, dict]:
+    """Resolve monitor name to (name, info) from kscreen-doctor.
+
+    Defaults to the first monitor at position (0,0), i.e. the leftmost.
+    """
+    monitors = get_monitor_info()
+    if not monitors:
+        return (name or "unknown", {"x": 0, "y": 0, "w": 2560, "h": 1440, "scale": 1.0})
+
+    if name and name in monitors:
+        return (name, monitors[name])
+
+    # Default: leftmost monitor (lowest x)
+    best_name = min(monitors, key=lambda n: monitors[n]["x"])
+    return (best_name, monitors[best_name])
+
+
+def _get_image_size(path: Path) -> tuple[int, int]:
+    """Get image pixel dimensions via magick identify."""
+    result = run_command(f"magick identify -format '%w %h' {path}")
+    if result.returncode == 0:
+        parts = result.stdout.strip().split()
+        if len(parts) == 2:
+            return int(parts[0]), int(parts[1])
+    return 0, 0
+
+
 def capture_screen(name: str | None = None) -> tuple[bytes, dict]:
-    """Capture current monitor (the one with the active window).
+    """Capture a specific monitor via spectacle full-desktop + crop.
 
-    If name is given it is informational only -- spectacle -m always captures
-    the monitor that currently has focus.
-
-    Returns (jpeg_bytes, metadata) where metadata includes monitor origin,
-    logical size, and scale.
+    Defaults to the leftmost monitor if name is not given.
+    Returns (jpeg_bytes, metadata).
     """
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    mon_name, mon_info = _pick_monitor(name)
 
     timestamp = int(time.time() * 1000)
     png_path = SCREENSHOT_DIR / f"mon-{timestamp}.png"
     jpg_path = png_path.with_suffix(".jpg")
 
+    # Capture full desktop, then crop to the target monitor region
     result = run_command(
-        f"spectacle -m --background --nonotify --output {png_path}"
+        f"spectacle -f --background --nonotify --output {png_path}"
     )
     if result.returncode != 0:
         raise RuntimeError(f"spectacle capture failed: {result.stderr}")
 
-    # Convert PNG to JPEG
-    conv = run_command(f"magick {png_path} -quality 90 {jpg_path}")
+    # Spectacle renders at a DPI scale that may differ from logical coords.
+    # Detect the scale by comparing image width to logical desktop width.
+    monitors = get_monitor_info()
+    logical_w = max((m["x"] + m["w"]) for m in monitors.values()) if monitors else 1
+    img_w, _ = _get_image_size(png_path)
+    dpi_scale = img_w / logical_w if logical_w > 0 and img_w > 0 else 1.0
+
+    # Crop coordinates in image pixels
+    cx = int(mon_info["x"] * dpi_scale)
+    cy = int(mon_info["y"] * dpi_scale)
+    cw = int(mon_info["w"] * dpi_scale)
+    ch = int(mon_info["h"] * dpi_scale)
+    crop = f"{cw}x{ch}+{cx}+{cy}"
+    conv = run_command(f"magick {png_path} -crop {crop} +repage -quality 85 {jpg_path}")
     if conv.returncode != 0:
-        jpeg_bytes = png_path.read_bytes()
+        conv2 = run_command(f"magick {png_path} -quality 85 {jpg_path}")
+        if conv2.returncode != 0:
+            jpeg_bytes = png_path.read_bytes()
+        else:
+            jpeg_bytes = jpg_path.read_bytes()
     else:
         jpeg_bytes = jpg_path.read_bytes()
-        png_path.unlink(missing_ok=True)
-
-    # Determine which monitor was captured from active window position
-    win = get_active_window_info()
-    monitors = get_monitor_info()
-
-    # Find the monitor containing the active window
-    mon_info = {"x": 0, "y": 0, "w": 0, "h": 0, "scale": 1.0}
-    mon_name = name or "unknown"
-    for mname, m in monitors.items():
-        wx = win.get("x", 0)
-        if m["x"] <= wx < m["x"] + m["w"]:
-            mon_info = m
-            mon_name = mname
-            break
+    png_path.unlink(missing_ok=True)
 
     metadata = {
         "monitor": mon_name,

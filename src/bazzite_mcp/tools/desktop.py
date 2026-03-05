@@ -13,7 +13,7 @@ from typing import Literal
 from mcp.server.fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
-from bazzite_mcp.kwin_screenshot import capture_active_window, capture_screen
+from bazzite_mcp.kwin_screenshot import capture_screen
 from bazzite_mcp.portal import PortalClient, get_portal
 from bazzite_mcp.runner import run_command
 
@@ -536,6 +536,18 @@ def _send_key(key: str, window: str | None = None) -> str:
 
 
 
+def _get_virtual_desktop_size() -> tuple[int, int]:
+    """Get the logical virtual desktop size from kscreen-doctor."""
+    from bazzite_mcp.kwin_screenshot import get_monitor_info
+
+    monitors = get_monitor_info()
+    if not monitors:
+        return (2560, 1440)
+    w = max(m["x"] + m["w"] for m in monitors.values())
+    h = max(m["y"] + m["h"] for m in monitors.values())
+    return (w, h)
+
+
 def _send_mouse(
     action: str,
     x: int,
@@ -543,39 +555,11 @@ def _send_mouse(
     button: str = "left",
     window: str | None = None,
 ) -> str:
-    """Send mouse input using portal (preferred) or ydotool (fallback)."""
-    portal = _get_portal()
-    if portal.is_connected:
-        if window:
-            uuid = _resolve_window(window)
-            _kwin_activate(uuid)
-            time.sleep(0.3)
+    """Send mouse input via ydotool with coordinate scaling.
 
-        # Apply coordinate offset from last screenshot metadata
-        if _last_screenshot_meta:
-            meta = _last_screenshot_meta
-            abs_x = meta["origin_x"] + x / meta["scale"]
-            abs_y = meta["origin_y"] + y / meta["scale"]
-        else:
-            abs_x, abs_y = float(x), float(y)
-        portal.pointer_move(abs_x, abs_y)
-        time.sleep(0.05)
-
-        if action == "move":
-            return f"Moved mouse to ({x}, {y})"
-
-        evdev_btn = {"left": 272, "right": 273, "middle": 274}.get(button, 272)
-        if action == "doubleclick":
-            portal.click(evdev_btn)
-            time.sleep(0.08)
-            portal.click(evdev_btn)
-        else:
-            portal.click(evdev_btn, action)
-
-        target = f" on '{window}'" if window else ""
-        return f"Mouse {action} at ({x}, {y}){target}"
-
-    # --- Fallback: ydotool (broken absolute positioning, best-effort) ---
+    ydotool absolute coordinates use 0-32767 range mapped to the full
+    virtual desktop.  We convert logical pixel coords to that range.
+    """
     sock = _ensure_ydotoold()
 
     if window:
@@ -583,23 +567,35 @@ def _send_mouse(
         _kwin_activate(uuid)
         time.sleep(0.3)
 
-    button_map = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}
-    btn_code = button_map.get(button, "0xC0")
+    # Convert screenshot-relative coords to logical desktop coords
+    if _last_screenshot_meta:
+        meta = _last_screenshot_meta
+        abs_x = meta["origin_x"] + x / meta["scale"]
+        abs_y = meta["origin_y"] + y / meta["scale"]
+    else:
+        abs_x, abs_y = float(x), float(y)
+
+    # Scale logical coords to ydotool 0-32767 range
+    vw, vh = _get_virtual_desktop_size()
+    yd_x = int(abs_x / vw * 32767)
+    yd_y = int(abs_y / vh * 32767)
 
     env = f"YDOTOOL_SOCKET={sock}"
-    run_command(f"{env} ydotool mousemove --absolute -x {x} -y {y}")
+    run_command(f"{env} ydotool mousemove --absolute -x {yd_x} -y {yd_y}")
+    time.sleep(0.05)
 
     if action == "move":
         return f"Moved mouse to ({x}, {y})"
 
+    button_map = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}
+    btn_code = button_map.get(button, "0xC0")
+
     if action == "doubleclick":
-        click_cmd = (
-            f"YDOTOOL_SOCKET={sock} ydotool click --repeat 2 --next-delay 80 {btn_code}"
-        )
+        click_cmd = f"{env} ydotool click --repeat 2 --next-delay 80 {btn_code}"
     elif action == "rightclick":
-        click_cmd = f"YDOTOOL_SOCKET={sock} ydotool click 0xC1"
+        click_cmd = f"{env} ydotool click 0xC1"
     else:
-        click_cmd = f"YDOTOOL_SOCKET={sock} ydotool click {btn_code}"
+        click_cmd = f"{env} ydotool click {btn_code}"
 
     result = run_command(click_cmd)
     if result.returncode != 0:
@@ -703,42 +699,27 @@ def screenshot(
             uuid = _resolve_window(window)
             _kwin_activate(uuid)
             time.sleep(0.4)
-        jpeg_bytes, meta = capture_active_window()
-        jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
-        jpg_path.write_bytes(jpeg_bytes)
-        _last_screenshot_meta = meta
-        caption = meta.get("caption", "Active Window")
-        w = meta.get("width", "?")
-        h = meta.get("height", "?")
-        ox = meta.get("origin_x", 0)
-        oy = meta.get("origin_y", 0)
-        scale = meta.get("scale", 1.0)
-        info = (
-            f'Screenshot: "{caption}" ({w}x{h})\n'
-            f"Coordinates: origin=({ox}, {oy}), scale={scale}\n"
-            f"Use pixel coordinates from this image with send_input(mode=\"mouse\")."
+        # Use spectacle -a for active window (no KWin queryWindowInfo needed)
+        png_path = SCREENSHOT_DIR / f"win-{timestamp}.png"
+        jpg_path = png_path.with_suffix(".jpg")
+        result = run_command(
+            f"spectacle -a --background --nonotify --output {png_path}"
         )
-        return [Image(path=str(jpg_path)), info]
+        if result.returncode != 0:
+            raise ToolError(f"spectacle capture failed: {result.stderr}")
+        conv = run_command(f"magick {png_path} -quality 85 {jpg_path}")
+        if conv.returncode != 0:
+            jpeg_bytes = png_path.read_bytes()
+            img_path = png_path
+        else:
+            jpeg_bytes = jpg_path.read_bytes()
+            png_path.unlink(missing_ok=True)
+            img_path = jpg_path
+        info = f"Screenshot: active window ({len(jpeg_bytes)} bytes)"
+        _last_screenshot_meta = None
+        return [Image(path=str(img_path)), info]
 
-    if target == "monitor":
-        jpeg_bytes, meta = capture_screen(monitor)
-        jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
-        jpg_path.write_bytes(jpeg_bytes)
-        _last_screenshot_meta = meta
-        mon_name = meta.get("monitor", monitor or "unknown")
-        w = meta.get("width", "?")
-        h = meta.get("height", "?")
-        ox = meta.get("origin_x", 0)
-        oy = meta.get("origin_y", 0)
-        scale = meta.get("scale", 1.0)
-        info = (
-            f'Screenshot: monitor "{mon_name}" ({w}x{h})\n'
-            f"Coordinates: origin=({ox}, {oy}), scale={scale}\n"
-            f"Use pixel coordinates from this image with send_input(mode=\"mouse\")."
-        )
-        return [Image(path=str(jpg_path)), info]
-
-    # target == "desktop" — capture the focused monitor (readable single-monitor shot)
+    # target == "desktop" or "monitor" — capture a specific monitor (default: leftmost)
     jpeg_bytes, meta = capture_screen(monitor)
     jpg_path = SCREENSHOT_DIR / f"capture-{timestamp}.jpg"
     jpg_path.write_bytes(jpeg_bytes)
