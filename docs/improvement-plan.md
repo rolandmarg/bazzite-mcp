@@ -1,4 +1,4 @@
-# Bazzite MCP — Improvement Plan
+# Bazzite MCP Improvement Plan
 
 Remaining items from expert review and testing sessions, ordered by priority.
 Each item is self-contained with root cause, files to modify, implementation steps,
@@ -57,7 +57,7 @@ sequentially at ~200ms each takes ~20 seconds.
 
 **Root cause:** The crawl loop is `while to_visit: url = to_visit.pop(); await client.get(url)`.
 
-**Files:** `src/bazzite_mcp/tools/docs.py`
+**Files:** `src/bazzite_mcp/tools/core/docs.py`
 
 **Steps:**
 1. Use `asyncio.Semaphore` to limit concurrency (e.g., 5 concurrent fetches)
@@ -94,11 +94,11 @@ faster.
 
 ### 16. Implement `manage_waydroid` tool
 
-**Problem:** `manage_waydroid` is documented in README and design docs, listed in
+**Problem:** `manage_waydroid` is still referenced in historical design docs and listed in
 the guardrails allowlist (`waydroid` command), but was never implemented.
 
 **Files:**
-- `src/bazzite_mcp/tools/containers.py` — add `manage_waydroid` function
+- `src/bazzite_mcp/tools/containers/` — add a `manage_waydroid` implementation in the containers package
 - `src/bazzite_mcp/server.py` — register the tool
 - `tests/test_tools_containers.py` — add tests
 

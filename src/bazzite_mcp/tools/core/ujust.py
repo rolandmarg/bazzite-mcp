@@ -75,7 +75,7 @@ def ujust(
     command: str | None = None,
     filter: str | None = None,
 ) -> str:
-    """Run, list, or inspect ujust commands — Bazzite's built-in system setup tool."""
+    """Run, list, or inspect ujust commands."""
     if action == "run":
         if not command:
             raise ToolError("'command' is required for action='run'.")

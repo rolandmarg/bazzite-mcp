@@ -62,10 +62,11 @@ def _expand_fts5_query(query: str) -> str:
 
 
 class DocsCache:
-    def __init__(self) -> None:
-        db_path = get_db_path("docs_cache.db")
-        self._conn = get_connection(db_path)
-        ensure_tables(self._conn, "cache")
+    def __init__(self, *, read_only: bool = False) -> None:
+        db_path = get_db_path("docs_cache.db", create_dir=not read_only)
+        self._conn = get_connection(db_path, read_only=read_only)
+        if not read_only:
+            ensure_tables(self._conn, "cache")
 
     def close(self) -> None:
         self._conn.close()

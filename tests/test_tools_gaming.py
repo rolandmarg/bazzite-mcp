@@ -6,13 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bazzite_mcp.runner import ToolError
-from bazzite_mcp.tools.gaming import (
-    _game_reports,
-    _game_settings_get,
-    _game_settings_set,
-    _steam_library,
-    gaming,
-)
+from bazzite_mcp.tools.gaming import gaming
+from bazzite_mcp.tools.gaming.library import _steam_library
+from bazzite_mcp.tools.gaming.reports import _game_reports
+from bazzite_mcp.tools.gaming.settings import _game_settings_get, _game_settings_set
 
 
 LIBRARY_FOLDERS_VDF = """"libraryfolders"
@@ -59,9 +56,9 @@ PCGW_DATA = {
 }
 
 
-@patch("bazzite_mcp.tools.gaming._find_steam_root")
-@patch("bazzite_mcp.tools.gaming._read_vdf_file")
-@patch("bazzite_mcp.tools.gaming._list_acf_files")
+@patch("bazzite_mcp.tools.gaming.library._find_steam_root")
+@patch("bazzite_mcp.tools.gaming.library._read_vdf_file")
+@patch("bazzite_mcp.tools.gaming.library._list_acf_files")
 def test_steam_library_lists_games(mock_list_acf, mock_read_vdf, mock_root) -> None:
     import vdf
 
@@ -77,9 +74,9 @@ def test_steam_library_lists_games(mock_list_acf, mock_read_vdf, mock_root) -> N
     assert "1091500" in result
 
 
-@patch("bazzite_mcp.tools.gaming._find_steam_root")
-@patch("bazzite_mcp.tools.gaming._read_vdf_file")
-@patch("bazzite_mcp.tools.gaming._list_acf_files")
+@patch("bazzite_mcp.tools.gaming.library._find_steam_root")
+@patch("bazzite_mcp.tools.gaming.library._read_vdf_file")
+@patch("bazzite_mcp.tools.gaming.library._list_acf_files")
 def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
     import vdf
 
@@ -103,7 +100,7 @@ def test_steam_library_filter(mock_list_acf, mock_read_vdf, mock_root) -> None:
     assert "No games found" in result or "0 games" in result.lower()
 
 
-@patch("bazzite_mcp.tools.gaming._find_steam_root")
+@patch("bazzite_mcp.tools.gaming.library._find_steam_root")
 def test_steam_library_no_steam(mock_root) -> None:
     mock_root.return_value = None
 
@@ -111,10 +108,10 @@ def test_steam_library_no_steam(mock_root) -> None:
     assert "not found" in result.lower() or "not installed" in result.lower()
 
 
-@patch("bazzite_mcp.tools.gaming._fetch_protondb_summary", new_callable=AsyncMock)
-@patch("bazzite_mcp.tools.gaming._fetch_pcgamingwiki_data", new_callable=AsyncMock)
-@patch("bazzite_mcp.tools.gaming._get_cached_reports")
-@patch("bazzite_mcp.tools.gaming._cache_reports")
+@patch("bazzite_mcp.tools.gaming.reports._fetch_protondb_summary", new_callable=AsyncMock)
+@patch("bazzite_mcp.tools.gaming.reports._fetch_pcgamingwiki_data", new_callable=AsyncMock)
+@patch("bazzite_mcp.tools.gaming.reports._get_cached_reports")
+@patch("bazzite_mcp.tools.gaming.reports._cache_reports")
 def test_game_reports_fetches_and_formats(
     mock_cache_store, mock_cache_get, mock_fetch_pcgw, mock_fetch_summary
 ) -> None:
@@ -130,7 +127,7 @@ def test_game_reports_fetches_and_formats(
     mock_cache_store.assert_called_once()
 
 
-@patch("bazzite_mcp.tools.gaming._get_cached_reports")
+@patch("bazzite_mcp.tools.gaming.reports._get_cached_reports")
 def test_game_reports_uses_cache(mock_cache_get) -> None:
     mock_cache_get.return_value = {
         "protondb_summary": PROTONDB_SUMMARY,
@@ -143,8 +140,8 @@ def test_game_reports_uses_cache(mock_cache_get) -> None:
     assert "pcgamingwiki" in result.lower()
 
 
-@patch("bazzite_mcp.tools.gaming._read_mangohud_config")
-@patch("bazzite_mcp.tools.gaming._read_steam_launch_options")
+@patch("bazzite_mcp.tools.gaming.settings._read_mangohud_config")
+@patch("bazzite_mcp.tools.gaming.settings._read_steam_launch_options")
 def test_game_settings_get(mock_read_launch_options, mock_read) -> None:
     mock_read.side_effect = [
         {"fps_limit": "60", "hud_no_margin": "1"},
@@ -159,10 +156,10 @@ def test_game_settings_get(mock_read_launch_options, mock_read) -> None:
     assert "gamescope" in result
 
 
-@patch("bazzite_mcp.tools.gaming.AuditLog")
-@patch("bazzite_mcp.tools.gaming._write_mangohud_config")
-@patch("bazzite_mcp.tools.gaming._read_mangohud_config")
-@patch("bazzite_mcp.tools.gaming._backup_file")
+@patch("bazzite_mcp.tools.gaming.settings.AuditLog")
+@patch("bazzite_mcp.tools.gaming.settings._write_mangohud_config")
+@patch("bazzite_mcp.tools.gaming.settings._read_mangohud_config")
+@patch("bazzite_mcp.tools.gaming.settings._backup_file")
 def test_game_settings_set_mangohud(mock_backup, mock_read, mock_write, mock_audit) -> None:
     mock_read.return_value = {}
 
@@ -175,8 +172,8 @@ def test_game_settings_set_mangohud(mock_backup, mock_read, mock_write, mock_aud
     mock_backup.assert_called()
 
 
-@patch("bazzite_mcp.tools.gaming.AuditLog")
-@patch("bazzite_mcp.tools.gaming._write_steam_launch_options")
+@patch("bazzite_mcp.tools.gaming.settings.AuditLog")
+@patch("bazzite_mcp.tools.gaming.settings._write_steam_launch_options")
 def test_game_settings_set_launch_options(mock_write, mock_audit) -> None:
     result = _game_settings_set(
         app_id=1091500,

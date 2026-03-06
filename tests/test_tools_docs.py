@@ -6,23 +6,12 @@ import pytest
 from bs4 import BeautifulSoup
 
 from bazzite_mcp.runner import ToolError
-from bazzite_mcp.tools.docs import (
+from bazzite_mcp.tools.core.docs import (
     _discover_doc_links,
     _extract_content,
-    _install_policy,
     _query_bazzite_docs,
     docs,
 )
-
-
-def test_install_policy_gui_app() -> None:
-    result = _install_policy("gui")
-    assert "flatpak" in result.lower()
-
-
-def test_install_policy_cli_tool() -> None:
-    result = _install_policy("cli")
-    assert "brew" in result.lower() or "homebrew" in result.lower()
 
 
 # --- _extract_content tests ---
@@ -113,7 +102,7 @@ def test_extract_content_strips_nav_header_footer_in_body_fallback() -> None:
 # --- _discover_doc_links tests ---
 
 
-@patch("bazzite_mcp.tools.docs.load_config")
+@patch("bazzite_mcp.tools.core.docs.load_config")
 def test_discover_doc_links_internal_links(mock_cfg: MagicMock) -> None:
     cfg = MagicMock()
     cfg.docs_base_url = "https://docs.bazzite.gg"
@@ -131,7 +120,7 @@ def test_discover_doc_links_internal_links(mock_cfg: MagicMock) -> None:
     assert "https://docs.bazzite.gg/Advanced/Reset/" in links
 
 
-@patch("bazzite_mcp.tools.docs.load_config")
+@patch("bazzite_mcp.tools.core.docs.load_config")
 def test_discover_doc_links_filters_external(mock_cfg: MagicMock) -> None:
     cfg = MagicMock()
     cfg.docs_base_url = "https://docs.bazzite.gg"
@@ -148,7 +137,7 @@ def test_discover_doc_links_filters_external(mock_cfg: MagicMock) -> None:
     assert len(links) == 0
 
 
-@patch("bazzite_mcp.tools.docs.load_config")
+@patch("bazzite_mcp.tools.core.docs.load_config")
 def test_discover_doc_links_filters_anchors(mock_cfg: MagicMock) -> None:
     cfg = MagicMock()
     cfg.docs_base_url = "https://docs.bazzite.gg"
@@ -167,7 +156,7 @@ def test_discover_doc_links_filters_anchors(mock_cfg: MagicMock) -> None:
         assert "#" not in link
 
 
-@patch("bazzite_mcp.tools.docs.load_config")
+@patch("bazzite_mcp.tools.core.docs.load_config")
 def test_discover_doc_links_filters_cdn_cgi(mock_cfg: MagicMock) -> None:
     cfg = MagicMock()
     cfg.docs_base_url = "https://docs.bazzite.gg"
@@ -186,8 +175,8 @@ def test_discover_doc_links_filters_cdn_cgi(mock_cfg: MagicMock) -> None:
 # --- _query_bazzite_docs tests (async) ---
 
 
-@patch("bazzite_mcp.tools.docs._refresh_docs_cache", new_callable=AsyncMock)
-@patch("bazzite_mcp.tools.docs.DocsCache")
+@patch("bazzite_mcp.tools.core.docs._refresh_docs_cache", new_callable=AsyncMock)
+@patch("bazzite_mcp.tools.core.docs.DocsCache")
 def test_query_bazzite_docs_auto_refreshes_when_empty(
     mock_cache_cls: MagicMock,
     mock_refresh: AsyncMock,
@@ -215,7 +204,7 @@ def test_query_bazzite_docs_auto_refreshes_when_empty(
     mock_refresh.assert_called_once()
 
 
-@patch("bazzite_mcp.tools.docs.DocsCache")
+@patch("bazzite_mcp.tools.core.docs.DocsCache")
 def test_query_bazzite_docs_with_results(
     mock_cache_cls: MagicMock,
 ) -> None:
@@ -239,7 +228,7 @@ def test_query_bazzite_docs_with_results(
     assert "Source:" in result
 
 
-@patch("bazzite_mcp.tools.docs.DocsCache")
+@patch("bazzite_mcp.tools.core.docs.DocsCache")
 def test_query_bazzite_docs_no_results(
     mock_cache_cls: MagicMock,
 ) -> None:
@@ -260,3 +249,8 @@ def test_query_bazzite_docs_no_results(
 def test_docs_dispatcher_search_requires_query() -> None:
     with pytest.raises(ToolError, match="query"):
         asyncio.run(docs(action="search"))
+
+
+def test_docs_dispatcher_rejects_removed_policy_action() -> None:
+    with pytest.raises(ToolError, match="Unknown action"):
+        asyncio.run(docs(action="policy"))  # type: ignore[arg-type]

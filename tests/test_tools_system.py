@@ -6,7 +6,7 @@ from bazzite_mcp.runner import ToolError
 from bazzite_mcp.tools.system import _hardware_info, _system_info_basic, system_info, manage_snapshots
 
 
-@patch("bazzite_mcp.tools.system.run_command")
+@patch("bazzite_mcp.tools.system.info.run_command")
 def test_system_info_basic(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="Bazzite 43", stderr="")
     result = _system_info_basic()
@@ -16,14 +16,14 @@ def test_system_info_basic(mock_run: MagicMock) -> None:
 # --- Dispatcher tests ---
 
 
-@patch("bazzite_mcp.tools.system.run_command")
+@patch("bazzite_mcp.tools.system.info.run_command")
 def test_system_info_dispatcher_basic(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="Bazzite 43", stderr="")
     result = system_info(detail="basic")
     assert "Bazzite" in result
 
 
-@patch("bazzite_mcp.tools.system.run_command")
+@patch("bazzite_mcp.tools.system.info.run_command")
 def test_system_info_dispatcher_full(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="GPU: NVIDIA RTX 3060 Ti", stderr="")
     result = system_info(detail="full")
@@ -38,7 +38,7 @@ LSPCI_WITH_FALSE_POSITIVE = (
 )
 
 
-@patch("bazzite_mcp.tools.system.run_command")
+@patch("bazzite_mcp.tools.system.info.run_command")
 def test_gpu_detection_ignores_hex_device_ids(mock_run: MagicMock) -> None:
     """Regression: '3d' in '43d2' must not match as a GPU."""
     mock_run.return_value = MagicMock(returncode=0, stdout=LSPCI_WITH_FALSE_POSITIVE, stderr="")
@@ -62,7 +62,7 @@ LSPCI_V_WITH_FALSE_POSITIVE = (
 )
 
 
-@patch("bazzite_mcp.tools.system.run_command")
+@patch("bazzite_mcp.tools.system.info.run_command")
 def test_hardware_info_gpu_ignores_hex_device_ids(mock_run: MagicMock) -> None:
     """Regression: _hardware_info must pick VGA line, not SATA with 43d2."""
     mock_run.return_value = MagicMock(returncode=0, stdout=LSPCI_V_WITH_FALSE_POSITIVE, stderr="")

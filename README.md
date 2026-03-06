@@ -1,14 +1,24 @@
 # bazzite-mcp
 
-MCP server that gives AI agents native awareness and control of [Bazzite OS](https://bazzite.gg/).
+MCP server and companion skill content for giving AI agents native awareness and control of [Bazzite OS](https://bazzite.gg/).
 
-Instead of stuffing OS knowledge into static prompt files, bazzite-mcp exposes **24 tools** (via action-dispatch pattern) that AI agents can call to query system state, install packages, manage services, change settings, and more — all following [official Bazzite best practices](https://docs.bazzite.gg/).
+Instead of stuffing OS knowledge into the MCP runtime, bazzite-mcp exposes **25 tools** (via action-dispatch pattern) that AI agents can call to query system state, install packages, manage services, change settings, and more. Bazzite-specific policy and workflow guidance now lives in the repo-local skill layer.
 
 Works with any MCP-compatible client: [Claude Code](https://claude.com/claude-code), [OpenCode](https://github.com/opencode-ai/opencode), Cursor, etc.
 
+The repository now uses a strict naming split:
+
+- `snake_case` for Python importable code under `src/bazzite_mcp/`
+- `kebab-case` for human-facing docs and skills under `docs/` and `skills/`
+
+The repo boundary is:
+
+- `src/bazzite_mcp/` for the MCP capability layer
+- `skills/bazzite-operator/` for workflow and policy guidance
+
 ## Features
 
-- **Smart package management** — follows Bazzite's 6-tier install hierarchy (ujust > flatpak > brew > distrobox > AppImage > rpm-ostree)
+- **Package management backends** — explicit search, install, removal, inventory, and updates across ujust, flatpak, brew, and rpm-ostree
 - **System settings** — theme, audio output, display config, power profile, gsettings
 - **Services & networking** — systemd, NetworkManager, firewalld, Tailscale
 - **Containers** — Distrobox, Quadlet, Podman
@@ -20,7 +30,7 @@ Works with any MCP-compatible client: [Claude Code](https://claude.com/claude-co
 - **Changelog tracking** — query what changed between Bazzite releases
 - **Audit log** — every mutation is logged with timestamp, command, and rollback command
 - **Guardrails** — command allowlist + blocklist defense-in-depth (blocks destructive ops, injection vectors, exfiltration)
-- **MCP Prompts** — reusable workflow templates for troubleshooting, installing apps, optimizing games
+- **Repo-local skill** — `bazzite-operator` captures Bazzite workflow and policy guidance
 - **Graceful lifecycle** — signal handlers, resource cleanup, and clean uninstall utility
 
 ## Install
@@ -102,6 +112,26 @@ If you run from a source checkout instead of a tool install, use:
 uv run --directory /path/to/bazzite-mcp python -m bazzite_mcp
 ```
 
+## Skills
+
+The repo includes a local skill at `skills/bazzite-operator/`.
+
+Use the skill for:
+
+- choosing between `ujust`, `flatpak`, `brew`, `distrobox`, `AppImage`, and `rpm-ostree`
+- Bazzite-specific troubleshooting and service-diagnosis workflows
+- development-environment setup patterns
+- gaming optimization workflows
+
+Use MCP tools for:
+
+- live state inspection
+- guarded host changes
+- docs search and changelog retrieval
+- audit and rollback
+
+See `docs/architecture.md` for the boundary and `skills/bazzite-operator/` for the first extracted workflow layer.
+
 ## Tools
 
 Tools use an action-dispatch pattern — each tool handles multiple related operations via an `action` parameter.
@@ -110,8 +140,8 @@ Tools use an action-dispatch pattern — each tool handles multiple related oper
 | Tool | Actions | Description |
 |------|---------|-------------|
 | `ujust` | `run`, `list`, `show` | Bazzite's built-in command runner (Tier 1) |
-| `packages` | `install`, `remove`, `search`, `list`, `update` | Smart package management with 6-tier hierarchy |
-| `docs` | `search`, `changelog`, `policy`, `refresh` | Bazzite docs search, changelogs, install policy |
+| `packages` | `install`, `remove`, `search`, `list`, `update` | Explicit package backend operations |
+| `docs` | `search`, `changelog`, `refresh` | Bazzite docs search, changelogs, and cache refresh |
 | `audit` | `query`, `rollback` | Query audit log and undo actions |
 
 ### System
@@ -141,8 +171,8 @@ Tools use an action-dispatch pattern — each tool handles multiple related oper
 ### Services & Networking
 | Tool | Actions | Description |
 |------|---------|-------------|
-| `manage_service` | `start`, `stop`, `restart`, `enable`, `disable`, `status`, `list` | Systemd service management |
-| `manage_firewall` | `list`, `add-port`, `remove-port`, `add-service`, `remove-service` | Firewalld rules |
+| `manage_service` | `start`, `stop`, `restart`, `enable`, `disable`, `enable_now`, `disable_now`, `status`, `list` | Systemd service management |
+| `manage_firewall` | `list`, `add_port`, `remove_port`, `add_service`, `remove_service` | Firewalld rules |
 | `manage_network` | `status`, `show`, `up`, `down`, `delete`, `modify`, `tailscale` | NetworkManager + Tailscale |
 
 ### Containers
@@ -162,16 +192,9 @@ Tools use an action-dispatch pattern — each tool handles multiple related oper
 |------|---------|-------------|
 | `gaming` | `library`, `reports`, `settings_get`, `settings_set` | Steam library, ProtonDB reports, MangoHud config |
 
-## Bazzite Install Hierarchy
+## Policy Boundary
 
-The server enforces the official 6-tier hierarchy from [docs.bazzite.gg](https://docs.bazzite.gg/):
-
-1. **ujust** — Bazzite's built-in command runner. Check first.
-2. **Flatpak** — Primary method for GUI apps.
-3. **Homebrew** — CLI/TUI tools only.
-4. **Distrobox/Quadlet** — Other distro package managers / persistent services.
-5. **AppImage** — Portable apps from trusted sources.
-6. **rpm-ostree** — Last resort. Can freeze updates and block rebasing.
+The install hierarchy and workflow rules are no longer exposed by MCP. They live in the skill layer under `skills/bazzite-operator/`.
 
 ## MCP Resources
 
@@ -180,22 +203,8 @@ Resources provide read-only context that agents can query without calling tools:
 | URI | Description |
 |-----|-------------|
 | `bazzite://system/overview` | Current OS, kernel, desktop, hardware |
-| `bazzite://install/hierarchy` | Full 6-tier install hierarchy with explanations |
-| `bazzite://install/policy` | Quick-reference install policy |
 | `bazzite://docs/index` | Index of all cached documentation pages |
 | `bazzite://server/info` | Server config, cache status, and version |
-
-## MCP Prompts
-
-Prompts are reusable workflow templates that agents can invoke:
-
-| Prompt | Description |
-|--------|-------------|
-| `troubleshoot_system` | Gather diagnostics for a system issue |
-| `install_app` | Walk through the 6-tier hierarchy to install an app |
-| `setup_dev_environment` | Set up a dev environment using distrobox |
-| `diagnose_service` | Debug a failing systemd service |
-| `optimize_game` | Optimize a game based on hardware and community data |
 
 ## On-Demand Refresh (Default)
 

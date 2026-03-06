@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -149,43 +150,6 @@ async def _bazzite_changelog(version: str | None = None, count: int = 5) -> str:
     return "\n\n".join(parts)
 
 
-def _install_policy(app_type: str) -> str:
-    """Explain recommended install method by app type."""
-    policies = {
-        "gui": (
-            "For GUI applications, use Flatpak (Tier 2).\n"
-            "Install via Bazaar app store or: flatpak install flathub <app-id>\n"
-            "Flatpak apps are sandboxed and update independently of the OS."
-        ),
-        "cli": (
-            "For CLI/TUI tools, use Homebrew (Tier 3).\n"
-            "Install via: brew install <package>\n"
-            "Homebrew installs to user-space and avoids immutable host changes."
-        ),
-        "service": (
-            "For persistent services, use Quadlet (Tier 4).\n"
-            "Quadlet combines systemd + podman for declarative container services."
-        ),
-        "dev-environment": (
-            "For development environments, use Distrobox (Tier 4).\n"
-            "Example:\n  distrobox create --name dev --image ubuntu:24.04\n  distrobox enter dev"
-        ),
-        "driver": (
-            "For drivers and kernel-adjacent packages, rpm-ostree is Tier 6 (last resort).\n"
-            "Use only when no alternative exists; it can block updates/rebases."
-        ),
-        "android": ("For Android apps, use Waydroid.\nSetup via: ujust setup-waydroid"),
-    }
-
-    if app_type not in policies:
-        supported = ", ".join(policies.keys())
-        raise ToolError(
-            f"Unknown app type '{app_type}'. Supported: {supported}.\n\n"
-            "General hierarchy: ujust > flatpak > brew > distrobox > AppImage > rpm-ostree"
-        )
-    return policies[app_type]
-
-
 async def _refresh_docs_cache(ctx: Context | None = None) -> str:
     """Crawl docs.bazzite.gg recursively and refresh the local cache."""
     cfg = load_config()
@@ -225,7 +189,7 @@ async def _refresh_docs_cache(ctx: Context | None = None) -> str:
             title = title_tag.get_text(strip=True) if title_tag else url
 
             parsed = urlparse(url)
-            path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+            path_parts = [part for part in parsed.path.strip("/").split("/") if part]
             section = "/".join(path_parts) if path_parts else "Home"
 
             return {
@@ -282,7 +246,6 @@ async def _refresh_docs_cache(ctx: Context | None = None) -> str:
             if fetched >= max_pages:
                 break
 
-    # Fetch changelogs from GitHub
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(
@@ -329,30 +292,20 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
     return await _refresh_docs_cache(ctx)
 
 
-# --- Dispatcher ---
-
-from typing import Literal
-
-
 async def docs(
-    action: Literal["search", "changelog", "policy", "refresh"],
+    action: Literal["search", "changelog", "refresh"],
     query: str | None = None,
     version: str | None = None,
     count: int = 5,
-    app_type: str | None = None,
     ctx: Context | None = None,
 ) -> str:
-    """Search docs, get changelogs, explain install policy, or refresh docs cache."""
+    """Search docs, get changelogs, or refresh the docs cache."""
     if action == "search":
         if not query:
             raise ToolError("'query' is required for action='search'.")
         return await _query_bazzite_docs(query, ctx)
     if action == "changelog":
         return await _bazzite_changelog(version, count)
-    if action == "policy":
-        if not app_type:
-            raise ToolError("'app_type' is required for action='policy'.")
-        return _install_policy(app_type)
     if action == "refresh":
         return await _refresh_docs_cache(ctx)
     raise ToolError(f"Unknown action '{action}'.")

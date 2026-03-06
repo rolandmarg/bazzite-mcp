@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import subprocess
 from typing import Literal
@@ -9,15 +8,6 @@ from typing import Literal
 from mcp.server.fastmcp.exceptions import ToolError
 
 from bazzite_mcp.runner import CommandResult, run_audited, run_command
-
-
-INSTALL_POLICY = """Bazzite 6-tier install hierarchy (official docs.bazzite.gg):
-1. ujust - check ujust --summary for setup/install commands first
-2. flatpak - primary method for GUI apps (via Flathub)
-3. brew - CLI/TUI tools only (no GUI apps)
-4. distrobox - for packages from other distro repos (apt, pacman, etc.)
-5. AppImage - portable apps from trusted sources only
-6. rpm-ostree - last resort. Can freeze updates, block rebasing, cause conflicts."""
 
 SEARCH_TIMEOUT_SECONDS = 20
 
@@ -38,50 +28,10 @@ def _run_search_command(
 
 def _install_package(
     package: str,
-    method: str | None = None,
+    method: str,
 ) -> str:
-    """Install package following Bazzite's 6-tier hierarchy, or use an explicit method."""
-    if method:
-        return _install_with_method(package, method)
-
-    pkg = shlex.quote(package)
-    ujust_summary = _run_search_command("ujust --summary 2>/dev/null")
-    ujust_lines = (
-        ujust_summary.stdout.strip().splitlines() if ujust_summary.stdout else []
-    )
-    matcher = re.compile(
-        rf"install.*{re.escape(package)}|setup.*{re.escape(package)}", re.IGNORECASE
-    )
-    matches = [line for line in ujust_lines if matcher.search(line)]
-    if ujust_summary.returncode == 0 and matches:
-        commands = matches
-        return (
-            f"Found ujust command(s) for '{package}':\n"
-            + "\n".join(f"  ujust {cmd.strip()}" for cmd in commands)
-            + f"\n\nRun with: ujust tool (action='run')\n\n{INSTALL_POLICY}"
-        )
-
-    flatpak_check = _run_search_command(f"flatpak search {pkg} 2>/dev/null")
-    if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
-        return (
-            f"Flatpak results for '{package}':\n{flatpak_check.stdout}\n\n"
-            f"Recommended: flatpak install flathub <app-id>\n\n{INSTALL_POLICY}"
-        )
-
-    brew_check = _run_search_command(
-        f"HOMEBREW_NO_AUTO_UPDATE=1 brew search {pkg} 2>/dev/null"
-    )
-    if brew_check.returncode == 0 and brew_check.stdout.strip():
-        return (
-            f"Homebrew results for '{package}':\n{brew_check.stdout}\n\n"
-            f"Recommended: brew install {package}\n\n{INSTALL_POLICY}"
-        )
-
-    return (
-        f"Package '{package}' not found in ujust, flatpak, or brew.\n"
-        "Consider: distrobox (other distro repos) or rpm-ostree (last resort).\n\n"
-        f"{INSTALL_POLICY}"
-    )
+    """Install a package with an explicit method."""
+    return _install_with_method(package, method)
 
 
 def _install_with_method(package: str, method: str) -> str:
@@ -150,7 +100,7 @@ def _remove_package(
 
 
 def _search_package(package: str) -> str:
-    """Search package across ujust, flatpak, brew."""
+    """Search package across explicit install backends."""
     parts: list[str] = []
     timed_out: list[str] = []
 
@@ -165,13 +115,13 @@ def _search_package(package: str) -> str:
             if package.lower() in line.lower()
         ]
         if matching_lines:
-            parts.append("[Tier 1 - ujust]\n" + "\n".join(matching_lines))
+            parts.append("[ujust]\n" + "\n".join(matching_lines))
 
     flatpak_check = _run_search_command(f"flatpak search {pkg} 2>/dev/null")
     if flatpak_check.returncode == 124:
         timed_out.append("flatpak")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
-        parts.append(f"[Tier 2 - Flatpak]\n{flatpak_check.stdout}")
+        parts.append(f"[flatpak]\n{flatpak_check.stdout}")
 
     brew_check = _run_search_command(
         f"HOMEBREW_NO_AUTO_UPDATE=1 brew search {pkg} 2>/dev/null"
@@ -179,21 +129,17 @@ def _search_package(package: str) -> str:
     if brew_check.returncode == 124:
         timed_out.append("brew")
     if brew_check.returncode == 0 and brew_check.stdout.strip():
-        parts.append(f"[Tier 3 - Homebrew]\n{brew_check.stdout}")
+        parts.append(f"[brew]\n{brew_check.stdout}")
 
     if not parts:
         timeout_note = (
             f"\nNote: timed out querying {', '.join(timed_out)}." if timed_out else ""
         )
-        return (
-            f"No results for '{package}' in ujust, flatpak, or brew.\n"
-            "Consider distrobox or rpm-ostree (last resort)."
-            f"{timeout_note}"
-        )
+        return f"No results for '{package}' in ujust, flatpak, or brew.{timeout_note}"
     timeout_note = (
         f"\n\nNote: timed out querying {', '.join(timed_out)}." if timed_out else ""
     )
-    return "\n\n".join(parts) + timeout_note + f"\n\n{INSTALL_POLICY}"
+    return "\n\n".join(parts) + timeout_note
 
 
 def _list_packages(
@@ -261,10 +207,10 @@ def packages(
     method: Literal["flatpak", "brew", "rpm-ostree", "ujust"] | None = None,
     source: Literal["system", "flatpak", "brew", "rpm-ostree"] | None = None,
 ) -> str:
-    """Install, remove, search, list, or update packages following the 6-tier hierarchy."""
+    """Install, remove, search, list, or update packages across supported backends."""
     if action == "install":
-        if not package:
-            raise ToolError("'package' is required for action='install'.")
+        if not package or not method:
+            raise ToolError("'package' and 'method' are required for action='install'.")
         return _install_package(package, method)
     if action == "remove":
         if not package or not method:

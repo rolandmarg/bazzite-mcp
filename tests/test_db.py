@@ -56,3 +56,26 @@ def test_get_connection_enables_foreign_keys(tmp_path, monkeypatch) -> None:
     conn.close()
     assert row is not None
     assert int(row[0]) == 1
+
+
+def test_get_connection_read_only_opens_existing_db(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    db_path = get_db_path("readonly.db")
+    conn = get_connection(db_path)
+    conn.execute("CREATE TABLE sample (value TEXT)")
+    conn.execute("INSERT INTO sample (value) VALUES ('ok')")
+    conn.commit()
+    conn.close()
+
+    db_path.chmod(0o444)
+    db_path.parent.chmod(0o555)
+    try:
+        read_only_conn = get_connection(db_path, read_only=True)
+        row = read_only_conn.execute("SELECT value FROM sample").fetchone()
+        read_only_conn.close()
+    finally:
+        db_path.parent.chmod(0o755)
+        db_path.chmod(0o644)
+
+    assert row is not None
+    assert row["value"] == "ok"

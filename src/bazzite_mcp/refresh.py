@@ -5,7 +5,7 @@ Used by the systemd timer: python -m bazzite_mcp.refresh
 
 import asyncio
 
-from bazzite_mcp.tools.docs import refresh_docs_cache
+from bazzite_mcp.tools.core import refresh_docs_cache
 
 
 def main() -> None:

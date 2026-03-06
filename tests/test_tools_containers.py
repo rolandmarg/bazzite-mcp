@@ -12,7 +12,7 @@ from bazzite_mcp.tools.containers import (
 )
 
 
-@patch("bazzite_mcp.tools.containers.run_command")
+@patch("bazzite_mcp.tools.containers.distrobox.run_command")
 def test_list_distroboxes(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(
         returncode=0, stdout="ubuntu-dev | running", stderr=""
@@ -21,7 +21,7 @@ def test_list_distroboxes(mock_run: MagicMock) -> None:
     assert "ubuntu" in result.lower()
 
 
-@patch("bazzite_mcp.tools.containers.run_audited")
+@patch("bazzite_mcp.tools.containers.distrobox.run_audited")
 def test_create_distrobox(mock_audited: MagicMock) -> None:
     mock_audited.return_value = MagicMock(
         returncode=0, stdout="Container created", stderr=""
@@ -30,7 +30,7 @@ def test_create_distrobox(mock_audited: MagicMock) -> None:
     assert "created" in result.lower() or "Container" in result
 
 
-@patch("bazzite_mcp.tools.containers.run_command")
+@patch("bazzite_mcp.tools.containers.podman.run_command")
 def test_manage_podman_exec_uses_command(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
     result = manage_podman("exec", container="box1", command="ls /")
@@ -38,8 +38,8 @@ def test_manage_podman_exec_uses_command(mock_run: MagicMock) -> None:
     assert "podman exec" in mock_run.call_args[0][0]
 
 
-@patch("bazzite_mcp.tools.containers.Path.home")
-@patch("bazzite_mcp.tools.containers.run_audited")
+@patch("bazzite_mcp.tools.containers.quadlet.Path.home")
+@patch("bazzite_mcp.tools.containers.quadlet.run_audited")
 def test_manage_quadlet_create_writes_unit(
     mock_audited: MagicMock, mock_home: MagicMock, tmp_path
 ) -> None:
@@ -58,8 +58,8 @@ def test_manage_quadlet_create_writes_unit(
     assert "Created Quadlet unit" in result
 
 
-@patch("bazzite_mcp.tools.containers.Path.home")
-@patch("bazzite_mcp.tools.containers.run_audited")
+@patch("bazzite_mcp.tools.containers.quadlet.Path.home")
+@patch("bazzite_mcp.tools.containers.quadlet.run_audited")
 def test_manage_quadlet_remove_deletes_unit(
     mock_audited: MagicMock, mock_home: MagicMock, tmp_path
 ) -> None:
@@ -82,7 +82,7 @@ def test_manage_quadlet_remove_deletes_unit(
 # --- Dispatcher tests ---
 
 
-@patch("bazzite_mcp.tools.containers.run_command")
+@patch("bazzite_mcp.tools.containers.distrobox.run_command")
 def test_manage_distrobox_list(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="ubuntu-dev | running", stderr="")
     result = manage_distrobox("list")

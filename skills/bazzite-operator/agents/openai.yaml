@@ -1,0 +1,7 @@
+interface:
+  display_name: "Bazzite Operator"
+  short_description: "Bazzite workflows and tool routing"
+  default_prompt: "Use $bazzite-operator to operate or troubleshoot a Bazzite system with the bazzite-mcp toolset."
+
+policy:
+  allow_implicit_invocation: true

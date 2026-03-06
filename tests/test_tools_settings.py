@@ -6,14 +6,14 @@ from bazzite_mcp.runner import ToolError
 from bazzite_mcp.tools.settings import _get_settings, _set_theme, quick_setting, gsettings
 
 
-@patch("bazzite_mcp.tools.settings.run_audited")
+@patch("bazzite_mcp.tools.settings.quick.run_audited")
 def test_set_theme_dark(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
     result = _set_theme("dark")
     assert "dark" in result.lower()
 
 
-@patch("bazzite_mcp.tools.settings.run_command")
+@patch("bazzite_mcp.tools.settings.schema.run_command")
 def test_get_settings(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="'prefer-dark'", stderr="")
     result = _get_settings("org.gnome.desktop.interface", "color-scheme")

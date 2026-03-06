@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bazzite_mcp.runner import ToolError
-from bazzite_mcp.tools.audit_tools import _audit_log_query, _rollback_action, audit
+from bazzite_mcp.tools.core.audit import _audit_log_query, _rollback_action, audit
 
 
 def test_audit_log_query_empty(tmp_path, monkeypatch) -> None:
@@ -15,8 +15,8 @@ def test_audit_log_query_empty(tmp_path, monkeypatch) -> None:
 # --- rollback_action tests ---
 
 
-@patch("bazzite_mcp.tools.audit_tools.run_audited")
-@patch("bazzite_mcp.tools.audit_tools.AuditLog")
+@patch("bazzite_mcp.tools.core.audit.run_audited")
+@patch("bazzite_mcp.tools.core.audit.AuditLog")
 def test_rollback_action_success(mock_log_cls: MagicMock, mock_run: MagicMock) -> None:
     mock_log = MagicMock()
     mock_log.get_rollback.return_value = "flatpak uninstall -y org.mozilla.firefox"
@@ -29,8 +29,8 @@ def test_rollback_action_success(mock_log_cls: MagicMock, mock_run: MagicMock) -
     assert "Success" in result
 
 
-@patch("bazzite_mcp.tools.audit_tools.run_audited")
-@patch("bazzite_mcp.tools.audit_tools.AuditLog")
+@patch("bazzite_mcp.tools.core.audit.run_audited")
+@patch("bazzite_mcp.tools.core.audit.AuditLog")
 def test_rollback_action_no_matching_action(mock_log_cls: MagicMock, mock_run: MagicMock) -> None:
     mock_log = MagicMock()
     mock_log.get_rollback.return_value = None

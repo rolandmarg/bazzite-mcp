@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bazzite_mcp.runner import ToolError
-from bazzite_mcp.tools.ujust import _ujust_list, _ujust_run, _ujust_show, ujust
+from bazzite_mcp.tools.core.ujust import _ujust_list, _ujust_run, _ujust_show, ujust
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_list(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(
         returncode=0,
@@ -18,7 +18,7 @@ def test_ujust_list(mock_run: MagicMock) -> None:
     mock_run.assert_called_once()
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_list_with_filter(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(
         returncode=0,
@@ -29,7 +29,7 @@ def test_ujust_list_with_filter(mock_run: MagicMock) -> None:
     assert "setup-waydroid" in result
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_show(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(
         returncode=0, stdout="#!/bin/bash\necho hello", stderr=""
@@ -38,7 +38,7 @@ def test_ujust_show(mock_run: MagicMock) -> None:
     assert "echo hello" in result
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_list_falls_back_to_full_list(mock_run: MagicMock) -> None:
     mock_run.side_effect = [
         MagicMock(returncode=1, stdout="", stderr="unknown option --summary"),
@@ -53,7 +53,7 @@ def test_ujust_list_falls_back_to_full_list(mock_run: MagicMock) -> None:
     assert mock_run.call_args_list[1].args[0] == "ujust"
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_run_help_uses_usage(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="usage output", stderr="")
 
@@ -63,7 +63,7 @@ def test_ujust_run_help_uses_usage(mock_run: MagicMock) -> None:
     mock_run.assert_called_once_with("ujust --usage setup-virtualization")
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_run_blocks_interactive_recipe_without_option(
     mock_run: MagicMock,
 ) -> None:
@@ -77,8 +77,8 @@ def test_ujust_run_blocks_interactive_recipe_without_option(
         _ujust_run("my_recipe")
 
 
-@patch("bazzite_mcp.tools.ujust.run_audited")
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_audited")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_run_executes_non_interactive_recipe(
     mock_run_command: MagicMock,
     mock_run_audited: MagicMock,
@@ -95,7 +95,7 @@ def test_ujust_run_executes_non_interactive_recipe(
 # --- Dispatcher tests ---
 
 
-@patch("bazzite_mcp.tools.ujust.run_command")
+@patch("bazzite_mcp.tools.core.ujust.run_command")
 def test_ujust_dispatcher_list(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="update\nsetup", stderr="")
     result = ujust(action="list")

@@ -1,19 +1,28 @@
 import os
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote
 
 
-def get_db_path(filename: str) -> Path:
+def get_db_path(filename: str, *, create_dir: bool = True) -> Path:
     data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     db_dir = data_home / "bazzite-mcp"
-    db_dir.mkdir(parents=True, exist_ok=True)
+    if create_dir:
+        db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / filename
 
 
-def get_connection(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
+def get_connection(db_path: Path, *, read_only: bool = False) -> sqlite3.Connection:
+    if read_only:
+        conn = sqlite3.connect(
+            f"file:{quote(str(db_path), safe='/')}?mode=ro&immutable=1",
+            uri=True,
+        )
+    else:
+        conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    if not read_only:
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
