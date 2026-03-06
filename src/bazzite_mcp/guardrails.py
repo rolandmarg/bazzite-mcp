@@ -75,6 +75,8 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
     }
 )
 
+# --- Shell-mode blocked patterns (for shell=True string commands) ---
+
 BLOCKED_PATTERNS = [
     (r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+.*)?/\s*$", "destructive filesystem operation"),
     (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/", "destructive filesystem operation"),
@@ -101,7 +103,12 @@ BLOCKED_PATTERNS = [
     # Fork bombs and resource exhaustion
     (r":\(\)\s*\{", "fork bomb detected"),
     (r"\bwhile\s+true\b.*\bdone\b", "infinite loop detected"),
-    (r"[;|`]|&&|\|\|", "shell metacharacters (;, |, &&, ||, `) are blocked"),
+    # Shell metacharacters — block chaining, substitution, pipes
+    (r";", "semicolons are blocked for safety"),
+    (r"&&", "command chaining (&&) is blocked for safety"),
+    (r"\|\|", "command chaining (||) is blocked for safety"),
+    (r"`", "backtick substitution is blocked for safety"),
+    (r"(?<!\d)\|(?!\|)", "pipes are blocked for safety"),
     (r"\$\(", "command substitution $() is blocked"),
     # Privilege escalation via path
     (r"/usr/s?bin/rm\b", "use rm without full path"),
@@ -143,6 +150,7 @@ def _extract_command_prefix(command: str) -> str | None:
 
 
 def check_command(command: str) -> CheckResult:
+    """Validate a shell command string (for shell=True execution)."""
     # Check blocked patterns first (these override everything)
     for pattern, reason in BLOCKED_PATTERNS:
         if re.search(pattern, command):
@@ -166,5 +174,97 @@ def check_command(command: str) -> CheckResult:
     for pattern, warning in WARN_PATTERNS:
         if re.search(pattern, command):
             return CheckResult(allowed=True, warning=warning)
+
+    return CheckResult(allowed=True)
+
+
+# --- Argv-mode validation (for shell=False execution) ---
+# With shell=False, metacharacter injection is impossible (no shell interprets
+# the arguments), so we only need to check the binary allowlist and
+# dangerous argument patterns.
+
+# Binaries that must never be executed, even if they appear in the allowlist.
+_BLOCKED_BINARIES = frozenset({
+    "curl", "wget", "nc", "ncat",
+})
+
+
+def check_argv(argv: list[str]) -> CheckResult:
+    """Validate a command given as an argv list (for shell=False execution).
+
+    With shell=False, there is no shell to interpret metacharacters, so we
+    only need to validate the binary and its arguments.
+    """
+    if not argv:
+        raise GuardrailError("Blocked: empty command")
+
+    binary = argv[0].rsplit("/", 1)[-1]
+
+    # Blocked binaries (takes priority)
+    if binary in _BLOCKED_BINARIES:
+        raise GuardrailError(f"Blocked: '{binary}' is not allowed")
+
+    # Allowlist
+    if binary not in ALLOWED_COMMAND_PREFIXES:
+        raise GuardrailError(
+            f"Blocked: command '{binary}' is not in the allowed command list"
+        )
+
+    args = argv[1:]
+
+    # Destructive binary+arg checks
+    if binary == "rm":
+        has_force = any(re.match(r"^-[a-zA-Z]*f", a) for a in args)
+        targets_root = any(a in ("/", "/*") for a in args)
+        if has_force and targets_root:
+            raise GuardrailError("Blocked: destructive filesystem operation")
+
+    if binary.startswith("mkfs"):
+        raise GuardrailError("Blocked: destructive filesystem operation")
+
+    if binary == "dd":
+        if any(a.startswith("of=/dev/") for a in args):
+            raise GuardrailError("Blocked: destructive disk write")
+
+    if binary == "shred":
+        raise GuardrailError("Blocked: destructive file operation")
+
+    if binary == "wipefs":
+        raise GuardrailError("Blocked: destructive disk operation")
+
+    if binary == "chmod" and any(re.match(r"^[0-7]*777$", a) for a in args):
+        raise GuardrailError("Blocked: world-writable permissions are blocked")
+
+    if binary == "chown" and args and args[0] == "root":
+        raise GuardrailError("Blocked: changing ownership to root is blocked")
+
+    if binary == "systemctl" and any(a in ("mask", "unmask") for a in args):
+        raise GuardrailError("Blocked: masking services is blocked for safety")
+
+    # rpm-ostree checks
+    if binary == "rpm-ostree":
+        if "reset" in args:
+            raise GuardrailError("Blocked: destructive: removes ALL layered packages")
+        if "rebase" in args:
+            rest = " ".join(args)
+            if re.search(r"gnome|kde|plasma|sway|hyprland|cosmic", rest):
+                raise GuardrailError(
+                    "Blocked: Do NOT rebase to switch desktop environments."
+                )
+        if "install" in args:
+            return CheckResult(
+                allowed=True,
+                warning="rpm-ostree is a LAST RESORT on Bazzite. It can freeze updates, block rebasing, and cause dependency conflicts. Prefer: ujust > flatpak > brew > distrobox > AppImage.",
+            )
+
+    # Hostname length check
+    if binary == "hostnamectl" and "set-hostname" in args:
+        idx = args.index("set-hostname")
+        if idx + 1 < len(args):
+            hostname = args[idx + 1].strip("'\"")
+            if len(hostname) > 20:
+                raise GuardrailError(
+                    f"Blocked: hostname '{hostname}' exceeds 20 characters (breaks Distrobox)"
+                )
 
     return CheckResult(allowed=True)

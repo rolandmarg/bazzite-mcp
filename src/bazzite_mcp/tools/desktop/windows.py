@@ -4,6 +4,7 @@ import json
 import re
 from typing import Literal
 
+from bazzite_mcp.desktop_env import format_graphical_error
 from mcp.server.fastmcp.exceptions import ToolError
 
 from bazzite_mcp.runner import run_command
@@ -18,7 +19,7 @@ def _kwin_get_windows() -> list[dict]:
         '--method org.kde.krunner1.Match " "'
     )
     if result.returncode != 0:
-        raise ToolError(f"Failed to query KWin windows: {result.stderr}")
+        raise ToolError(format_graphical_error("Failed to query KWin windows", result.stderr))
 
     raw = result.stdout
     entries = re.findall(
@@ -80,7 +81,7 @@ def _kwin_activate(uuid: str) -> None:
         f"qdbus org.kde.KWin /WindowsRunner org.kde.krunner1.Run '0_{{{uuid}}}' ''"
     )
     if result.returncode != 0:
-        raise ToolError(f"Failed to activate window {uuid}: {result.stderr}")
+        raise ToolError(format_graphical_error(f"Failed to activate window {uuid}", result.stderr))
 
 
 def _resolve_window(window: str) -> str:

@@ -8,14 +8,17 @@ def test_main_runs_stdio_server(monkeypatch) -> None:
     run_mock = MagicMock()
     signal_mock = MagicMock()
     register_mock = MagicMock()
+    load_config_mock = MagicMock()
 
     monkeypatch.setattr(main_module.mcp, "run", run_mock)
     monkeypatch.setattr(main_module.signal, "signal", signal_mock)
     monkeypatch.setattr(main_module.atexit, "register", register_mock)
+    monkeypatch.setattr(main_module, "load_config", load_config_mock)
     monkeypatch.setattr(main_module.sys, "argv", ["bazzite-mcp"])
 
     main_module.main()
 
+    load_config_mock.assert_called_once()
     run_mock.assert_called_once_with(transport="stdio")
     assert signal_mock.call_count == 2
     register_mock.assert_called_once()

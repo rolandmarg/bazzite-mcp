@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -7,8 +8,8 @@ from typing import Literal
 
 from mcp.server.fastmcp.exceptions import ToolError
 
-from bazzite_mcp.runner import run_command
-from . import capture as capture_mod
+from bazzite_mcp.desktop_env import build_command_env
+from bazzite_mcp.screen_geometry import get_monitor_info
 from .shared import SCREENSHOT_DIR, YDOTOOL_SOCKET
 from .windows import _kwin_activate, _resolve_window
 
@@ -50,33 +51,46 @@ def _ensure_ydotoold() -> str:
     raise ToolError("ydotoold failed to start within 2 seconds")
 
 
-def _shell_quote(text: str) -> str:
-    return "'" + text.replace("'", "'\\''") + "'"
+def _run_ydotool(argv: list[str], sock: str) -> subprocess.CompletedProcess:
+    """Run a ydotool command with the socket env set (shell=False)."""
+    env = build_command_env()
+    env["YDOTOOL_SOCKET"] = sock
+    return subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+        env=env,
+    )
 
 
-def _get_virtual_desktop_size() -> tuple[int, int]:
-    """Get the logical virtual desktop size from monitor geometry."""
-    from bazzite_mcp.kwin_screenshot import get_monitor_info
-
-    monitors = get_monitor_info()
-    if not monitors:
-        return (2560, 1440)
-    width = max(monitor["x"] + monitor["w"] for monitor in monitors.values())
-    height = max(monitor["y"] + monitor["h"] for monitor in monitors.values())
-    return (width, height)
-
-
-def _send_keys(keys: str, window: str | None = None) -> str:
-    """Send keyboard input using ydotool (Wayland-native)."""
-    sock = _ensure_ydotoold()
-
+def _focus_window(window: str | None) -> None:
+    """Activate a window by name if specified."""
     if window:
         uuid = _resolve_window(window)
         _kwin_activate(uuid)
         time.sleep(0.3)
 
-    result = run_command(
-        f"YDOTOOL_SOCKET={sock} ydotool type --key-delay 12 -- {_shell_quote(keys)}"
+
+def _get_virtual_desktop_size() -> tuple[int, int]:
+    """Get the logical virtual desktop size from monitor geometry."""
+    monitors = get_monitor_info()
+    if not monitors:
+        return (2560, 1440)
+    width = max(m["x"] + m["w"] for m in monitors.values())
+    height = max(m["y"] + m["h"] for m in monitors.values())
+    return (width, height)
+
+
+def _send_keys(keys: str, window: str | None = None) -> str:
+    """Type text using ydotool."""
+    sock = _ensure_ydotoold()
+    _focus_window(window)
+
+    result = _run_ydotool(
+        ["ydotool", "type", "--key-delay", "12", "--", keys], sock
     )
     if result.returncode != 0:
         raise ToolError(f"ydotool type failed: {result.stderr}")
@@ -88,13 +102,9 @@ def _send_keys(keys: str, window: str | None = None) -> str:
 def _send_key(key: str, window: str | None = None) -> str:
     """Send a key press/release using ydotool key codes."""
     sock = _ensure_ydotoold()
+    _focus_window(window)
 
-    if window:
-        uuid = _resolve_window(window)
-        _kwin_activate(uuid)
-        time.sleep(0.3)
-
-    result = run_command(f"YDOTOOL_SOCKET={sock} ydotool key {_shell_quote(key)}")
+    result = _run_ydotool(["ydotool", "key", key], sock)
     if result.returncode != 0:
         raise ToolError(f"ydotool key failed: {result.stderr}")
 
@@ -108,19 +118,24 @@ def _send_mouse(
     y: int,
     button: str = "left",
     window: str | None = None,
+    screenshot_meta: dict | None = None,
 ) -> str:
-    """Send mouse input via ydotool with coordinate scaling."""
+    """Send mouse input via ydotool with coordinate scaling.
+
+    If screenshot_meta is provided (from a prior screenshot() call),
+    pixel coordinates are translated to absolute desktop coordinates
+    using the monitor origin and scale factor.
+    """
     sock = _ensure_ydotoold()
+    _focus_window(window)
 
-    if window:
-        uuid = _resolve_window(window)
-        _kwin_activate(uuid)
-        time.sleep(0.3)
-
-    if capture_mod._last_screenshot_meta:
-        meta = capture_mod._last_screenshot_meta
-        abs_x = meta["origin_x"] + x / meta["scale"]
-        abs_y = meta["origin_y"] + y / meta["scale"]
+    if screenshot_meta:
+        abs_x = screenshot_meta.get("origin_x", 0) + x / screenshot_meta.get(
+            "scale", 1.0
+        )
+        abs_y = screenshot_meta.get("origin_y", 0) + y / screenshot_meta.get(
+            "scale", 1.0
+        )
     else:
         abs_x, abs_y = float(x), float(y)
 
@@ -128,8 +143,10 @@ def _send_mouse(
     yd_x = int(abs_x / vw * 32767)
     yd_y = int(abs_y / vh * 32767)
 
-    env = f"YDOTOOL_SOCKET={sock}"
-    run_command(f"{env} ydotool mousemove --absolute -x {yd_x} -y {yd_y}")
+    _run_ydotool(
+        ["ydotool", "mousemove", "--absolute", "-x", str(yd_x), "-y", str(yd_y)],
+        sock,
+    )
     time.sleep(0.05)
 
     if action == "move":
@@ -139,13 +156,13 @@ def _send_mouse(
     btn_code = button_map.get(button, "0xC0")
 
     if action == "doubleclick":
-        click_cmd = f"{env} ydotool click --repeat 2 --next-delay 80 {btn_code}"
+        argv = ["ydotool", "click", "--repeat", "2", "--next-delay", "80", btn_code]
     elif action == "rightclick":
-        click_cmd = f"{env} ydotool click 0xC1"
+        argv = ["ydotool", "click", "0xC1"]
     else:
-        click_cmd = f"{env} ydotool click {btn_code}"
+        argv = ["ydotool", "click", btn_code]
 
-    result = run_command(click_cmd)
+    result = _run_ydotool(argv, sock)
     if result.returncode != 0:
         raise ToolError(f"Mouse {action} failed: {result.stderr}")
 
@@ -162,8 +179,13 @@ def send_input(
     y: int | None = None,
     button: str = "left",
     window: str | None = None,
+    screenshot_meta: str | None = None,
 ) -> str:
-    """Send keyboard or mouse input via ydotool."""
+    """Send keyboard or mouse input via ydotool.
+
+    For mouse mode with coordinates from a screenshot, pass the metadata
+    JSON string from the screenshot response as screenshot_meta.
+    """
     if mode == "type":
         if not keys:
             raise ToolError("'keys' is required for mode='type'.")
@@ -175,5 +197,6 @@ def send_input(
     if mode == "mouse":
         if x is None or y is None:
             raise ToolError("'x' and 'y' are required for mode='mouse'.")
-        return _send_mouse(action or "click", x, y, button, window)
+        meta = json.loads(screenshot_meta) if screenshot_meta else None
+        return _send_mouse(action or "click", x, y, button, window, meta)
     raise ToolError(f"Unknown mode '{mode}'.")

@@ -62,7 +62,7 @@ class Config:
     crawl_max_pages: int = 100
 
     # Audit
-    audit_output_max_chars: int = 500
+    audit_output_max_chars: int = 2000
 
     def validate(self) -> None:
         if self.cache_ttl_days < 0:

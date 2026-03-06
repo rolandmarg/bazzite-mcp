@@ -8,6 +8,7 @@ import signal
 import sys
 
 from bazzite_mcp import __version__
+from bazzite_mcp.config import load_config
 from bazzite_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ def main() -> None:
         ),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    load_config()
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)

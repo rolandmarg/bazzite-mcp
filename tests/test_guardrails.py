@@ -1,6 +1,6 @@
 import pytest
 
-from bazzite_mcp.guardrails import GuardrailError, check_command
+from bazzite_mcp.guardrails import GuardrailError, check_argv, check_command
 
 
 def test_blocks_rm_rf_root() -> None:
@@ -131,7 +131,7 @@ def test_allows_stderr_redirect_for_cat() -> None:
 
 
 def test_blocks_shell_metacharacter_chaining() -> None:
-    with pytest.raises(GuardrailError, match="shell metacharacters"):
+    with pytest.raises(GuardrailError, match="command chaining"):
         check_command("echo hi && true")
 
 
@@ -148,3 +148,88 @@ def test_allows_virsh_list() -> None:
 def test_allows_virt_install() -> None:
     result = check_command("virt-install --name lab --memory 4096 --vcpus 2 --wait 0")
     assert result.allowed is True
+
+
+# --- check_argv tests (shell=False validation) ---
+
+
+def test_argv_allows_flatpak() -> None:
+    result = check_argv(["flatpak", "install", "flathub", "org.mozilla.firefox"])
+    assert result.allowed is True
+
+
+def test_argv_blocks_unknown_binary() -> None:
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["hackertool", "--pwn"])
+
+
+def test_argv_blocks_curl() -> None:
+    with pytest.raises(GuardrailError, match="not allowed"):
+        check_argv(["curl", "http://evil.com"])
+
+
+def test_argv_blocks_wget() -> None:
+    with pytest.raises(GuardrailError, match="not allowed"):
+        check_argv(["wget", "http://evil.com"])
+
+
+def test_argv_blocks_rm_rf_root() -> None:
+    """rm is not in the allowlist, so it's blocked before arg checks."""
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["rm", "-rf", "/"])
+
+
+def test_argv_blocks_mkfs() -> None:
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["mkfs.ext4", "/dev/sda1"])
+
+
+def test_argv_blocks_dd_to_device() -> None:
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["dd", "if=/dev/zero", "of=/dev/sda", "bs=4M"])
+
+
+def test_argv_blocks_shred() -> None:
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["shred", "/dev/sda"])
+
+
+def test_argv_blocks_chmod_777() -> None:
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["chmod", "777", "/etc/passwd"])
+
+
+def test_argv_blocks_chown_root() -> None:
+    with pytest.raises(GuardrailError, match="not in the allowed"):
+        check_argv(["chown", "root", "/tmp/escalate"])
+
+
+def test_argv_blocks_systemctl_mask() -> None:
+    with pytest.raises(GuardrailError, match="masking"):
+        check_argv(["systemctl", "mask", "sshd"])
+
+
+def test_argv_blocks_rpm_ostree_reset() -> None:
+    with pytest.raises(GuardrailError, match="destructive"):
+        check_argv(["rpm-ostree", "reset"])
+
+
+def test_argv_warns_rpm_ostree_install() -> None:
+    result = check_argv(["rpm-ostree", "install", "htop"])
+    assert result.warning is not None
+    assert "last resort" in result.warning.lower()
+
+
+def test_argv_blocks_long_hostname() -> None:
+    with pytest.raises(GuardrailError, match="hostname"):
+        check_argv(["hostnamectl", "set-hostname", "this-hostname-is-way-too-long-for-distrobox"])
+
+
+def test_argv_allows_short_hostname() -> None:
+    result = check_argv(["hostnamectl", "set-hostname", "mypc"])
+    assert result.allowed is True
+
+
+def test_argv_blocks_empty_command() -> None:
+    with pytest.raises(GuardrailError, match="empty"):
+        check_argv([])
