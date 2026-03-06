@@ -51,15 +51,9 @@ def _kwin_get_windows() -> list[dict]:
     return windows
 
 
-def _kwin_get_window_info(uuid: str) -> dict:
-    """Get detailed window info from KWin by UUID."""
-    result = run_command(
-        f"qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo '{{{uuid}}}'"
-    )
-    if result.returncode != 0:
-        return {}
+def _parse_window_info(raw: str) -> dict:
     info: dict = {}
-    for line in result.stdout.splitlines():
+    for line in raw.splitlines():
         if ": " in line:
             key, _, value = line.partition(": ")
             key = key.strip()
@@ -73,6 +67,24 @@ def _kwin_get_window_info(uuid: str) -> dict:
             else:
                 info[key] = value
     return info
+
+
+def _kwin_get_window_info(uuid: str) -> dict:
+    """Get detailed window info from KWin by UUID."""
+    result = run_command(
+        f"qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo '{{{uuid}}}'"
+    )
+    if result.returncode != 0:
+        return {}
+    return _parse_window_info(result.stdout)
+
+
+def _kwin_query_window_info() -> dict:
+    """Get detailed info for the active window from KWin."""
+    result = run_command("qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo")
+    if result.returncode != 0:
+        return {}
+    return _parse_window_info(result.stdout)
 
 
 def _kwin_activate(uuid: str) -> None:

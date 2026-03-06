@@ -30,7 +30,7 @@ def test_get_monitor_info(mock_run: MagicMock) -> None:
 
     monitors = get_monitor_info()
 
-    assert monitors["HDMI-A-1"] == {"x": 2560, "y": 169, "w": 2560, "h": 1440}
-    assert monitors["HDMI-A-2"] == {"x": 0, "y": 0, "w": 2560, "h": 1440}
+    assert monitors["HDMI-A-1"] == {"x": 2560, "y": 169, "w": 2560, "h": 1440, "scale": 1.5}
+    assert monitors["HDMI-A-2"] == {"x": 0, "y": 0, "w": 2560, "h": 1440, "scale": 1.0}
 
     get_monitor_info.cache_clear()

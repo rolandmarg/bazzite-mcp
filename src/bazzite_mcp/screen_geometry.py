@@ -29,7 +29,7 @@ def get_monitor_info() -> dict[str, dict]:
         header = re.match(r"Output:\s+\d+\s+(\S+)", line)
         if header:
             current_name = header.group(1)
-            monitors[current_name] = {"x": 0, "y": 0, "w": 0, "h": 0}
+            monitors[current_name] = {"x": 0, "y": 0, "w": 0, "h": 0, "scale": 1.0}
             continue
 
         if current_name is None:
@@ -41,5 +41,10 @@ def get_monitor_info() -> dict[str, dict]:
             monitors[current_name]["y"] = int(geometry.group(2))
             monitors[current_name]["w"] = int(geometry.group(3))
             monitors[current_name]["h"] = int(geometry.group(4))
+            continue
+
+        scale = re.match(r"\s*Scale:\s*(\d+(?:\.\d+)?)", line)
+        if scale:
+            monitors[current_name]["scale"] = float(scale.group(1))
 
     return monitors

@@ -1,3 +1,7 @@
+import json
+import struct
+import zlib
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fastmcp.utilities.types import Image
@@ -6,51 +10,97 @@ from bazzite_mcp.tools.desktop import screenshot
 from bazzite_mcp.tools.desktop.input import _send_mouse
 
 
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(data))
+        + chunk_type
+        + data
+        + struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF)
+    )
+
+
+def _write_png(path: Path, width: int, height: int) -> None:
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    row = b"\x00" + (b"\x00\x00\x00" * width)
+    raw = row * height
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(raw))
+        + _png_chunk(b"IEND", b"")
+    )
+    path.write_bytes(png)
+
+
 # --- screenshot tests ---
 
 
 @patch("bazzite_mcp.tools.desktop.capture.run_command")
-def test_screenshot_window_default_captures_active(mock_run: MagicMock, tmp_path) -> None:
+@patch("bazzite_mcp.tools.desktop.capture.get_monitor_info", return_value={"HDMI-A-1": {"x": 0, "y": 0, "w": 1280, "h": 720, "scale": 1.25}})
+@patch("bazzite_mcp.tools.desktop.capture._kwin_query_window_info")
+def test_screenshot_window_default_captures_active(
+    mock_window_info: MagicMock, mock_monitors: MagicMock, mock_run: MagicMock, tmp_path
+) -> None:
     """screenshot(target='window') captures the active window."""
+    mock_window_info.return_value = {"x": 100, "y": 50}
     def fake_run(cmd):
         m = MagicMock()
         m.returncode = 0
         if "spectacle" in cmd:
             import re as _re
             path = _re.search(r"-o\s+(\S+)", cmd).group(1)
-            from pathlib import Path
-            Path(path).write_bytes(b"\x89PNGfake")
+            _write_png(Path(path), 640, 480)
         return m
     mock_run.side_effect = fake_run
     result = screenshot(target="window")
     assert isinstance(result, list)
     assert len(result) == 2
     assert isinstance(result[0], Image)
-    assert result[1] == "Captured active window"
+    meta = json.loads(result[1])
+    assert meta["status"] == "Captured active window"
+    assert meta["target"] == "window"
+    assert meta["width"] == 640
+    assert meta["height"] == 480
+    assert meta["bytes"] > 0
+    assert meta["origin_x"] == 100
+    assert meta["origin_y"] == 50
+    assert meta["scale"] == 1.25
 
 
 @patch("bazzite_mcp.tools.desktop.capture.run_command")
+@patch("bazzite_mcp.tools.desktop.capture.get_monitor_info", return_value={"HDMI-A-1": {"x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 1.5}})
 @patch("bazzite_mcp.tools.desktop.capture._kwin_activate")
+@patch("bazzite_mcp.tools.desktop.capture._kwin_get_window_info")
 @patch("bazzite_mcp.tools.desktop.capture._resolve_window")
 def test_screenshot_window_with_name_activates_first(
-    mock_resolve: MagicMock, mock_activate: MagicMock, mock_run: MagicMock
+    mock_resolve: MagicMock,
+    mock_window_info: MagicMock,
+    mock_activate: MagicMock,
+    mock_monitors: MagicMock,
+    mock_run: MagicMock,
 ) -> None:
     """screenshot(target='window', window='brave') activates it first."""
     mock_resolve.return_value = "some-uuid"
+    mock_window_info.return_value = {"x": 320, "y": 200}
     def fake_run(cmd):
         m = MagicMock()
         m.returncode = 0
         if "spectacle" in cmd:
             import re as _re
             path = _re.search(r"-o\s+(\S+)", cmd).group(1)
-            from pathlib import Path
-            Path(path).write_bytes(b"\x89PNGfake")
+            _write_png(Path(path), 320, 240)
         return m
     mock_run.side_effect = fake_run
     result = screenshot(target="window", window="brave")
     mock_resolve.assert_called_once_with("brave")
     mock_activate.assert_called_once_with("some-uuid")
     assert isinstance(result[0], Image)
+    meta = json.loads(result[1])
+    assert meta["origin_x"] == 320
+    assert meta["origin_y"] == 200
+    assert meta["scale"] == 1.5
+    assert meta["width"] == 320
+    assert meta["height"] == 240
 
 
 @patch("bazzite_mcp.tools.desktop.capture.run_command")
@@ -62,14 +112,20 @@ def test_screenshot_desktop_target(mock_run: MagicMock) -> None:
         if "spectacle" in cmd:
             import re as _re
             path = _re.search(r"-o\s+(\S+)", cmd).group(1)
-            from pathlib import Path
-            Path(path).write_bytes(b"\x89PNGfake")
+            _write_png(Path(path), 1920, 1080)
         return m
 
     mock_run.side_effect = fake_run
     result = screenshot(target="desktop")
     assert isinstance(result, list)
-    assert result[1] == "Captured desktop"
+    meta = json.loads(result[1])
+    assert meta["status"] == "Captured desktop"
+    assert meta["target"] == "desktop"
+    assert meta["width"] == 1920
+    assert meta["height"] == 1080
+    assert meta["origin_x"] == 0
+    assert meta["origin_y"] == 0
+    assert meta["scale"] == 1.0
 
 
 # --- send_input mouse tests ---
