@@ -65,7 +65,12 @@ def screenshot(
     target: Literal["desktop", "window"] = "desktop",
     window: str | None = None,
 ):
-    """Capture a screenshot. Default captures the full desktop (all monitors). Use target='window' to capture just the active or a specific window."""
+    """Capture a screenshot and return the image directly. This is a single-call tool — do NOT list windows or gather system info first.
+
+    Call with no arguments for a full desktop capture (all monitors).
+    For a specific window: target='window', window='<substring>' — fuzzy-matches title or window class, activates the window, and captures it. No need to call manage_windows first.
+    For the currently active window: target='window' with no window argument.
+    """
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = int(time.time() * 1000)
     png_path = SCREENSHOT_DIR / f"screenshot-{target}-{timestamp}.png"
