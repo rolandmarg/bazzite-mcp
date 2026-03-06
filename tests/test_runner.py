@@ -100,13 +100,13 @@ def test_run_argv_uses_shell_false(mock_run: MagicMock) -> None:
 
 
 @patch("bazzite_mcp.runner.subprocess.run")
-def test_run_string_uses_shell_true(mock_run: MagicMock) -> None:
+def test_run_string_uses_shell_false(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
 
     run_command("echo hello")
 
     _, kwargs = mock_run.call_args
-    assert kwargs["shell"] is True
+    assert kwargs["shell"] is False
 
 
 def test_run_audited_argv(tmp_path, monkeypatch) -> None:

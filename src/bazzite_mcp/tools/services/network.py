@@ -29,10 +29,10 @@ def _manage_connection(
 ) -> str:
     """Create, modify, or delete NetworkManager connections."""
     if action == "show":
-        result = run_command("nmcli connection show")
+        result = run_command(["nmcli", "connection", "show"])
     elif action in ("up", "down", "delete") and name:
         result = run_audited(
-            f"nmcli connection {action} {shlex.quote(name)}",
+            ["nmcli", "connection", action, name],
             tool="manage_network",
             args={"action": action, "name": name},
         )
@@ -41,9 +41,8 @@ def _manage_connection(
             prop_parts = shlex.split(properties)
         except ValueError:
             raise ToolError("Invalid properties syntax.")
-        safe_props = " ".join(shlex.quote(part) for part in prop_parts)
         result = run_audited(
-            f"nmcli connection modify {shlex.quote(name)} {safe_props}",
+            ["nmcli", "connection", "modify", name, *prop_parts],
             tool="manage_network",
             args={"action": action, "name": name, "properties": properties},
         )

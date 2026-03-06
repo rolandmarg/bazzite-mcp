@@ -78,7 +78,7 @@ def screenshot(
             _kwin_activate(uuid)
             time.sleep(0.4)
 
-        result = run_command(f"spectacle -b -n -a -o {png_path}")
+        result = run_command(["spectacle", "-b", "-n", "-a", "-o", str(png_path)])
         if result.returncode != 0:
             raise ToolError(format_graphical_error("Spectacle capture failed", result.stderr))
         if target_window_info:
@@ -88,7 +88,7 @@ def screenshot(
             ]
         return [Image(path=str(png_path)), _build_metadata(png_path, "Captured active window", target)]
 
-    result = run_command(f"spectacle -b -n -f -o {png_path}")
+    result = run_command(["spectacle", "-b", "-n", "-f", "-o", str(png_path)])
     if result.returncode != 0:
         raise ToolError(format_graphical_error("Spectacle capture failed", result.stderr))
     return [Image(path=str(png_path)), _build_metadata(png_path, "Captured desktop", target)]

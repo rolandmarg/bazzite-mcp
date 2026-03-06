@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
@@ -18,10 +17,16 @@ def _set_theme(mode: str) -> str:
 
     scheme = schemes[mode]
     result = run_audited(
-        f"gsettings set org.gnome.desktop.interface color-scheme '{scheme}'",
+        ["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", scheme],
         tool="quick_setting",
         args={"mode": mode},
-        rollback="gsettings set org.gnome.desktop.interface color-scheme 'default'",
+        rollback=[
+            "gsettings",
+            "set",
+            "org.gnome.desktop.interface",
+            "color-scheme",
+            "default",
+        ],
     )
     if result.returncode != 0:
         raise ToolError(f"Failed to set theme: {result.stderr}")
@@ -31,11 +36,11 @@ def _set_theme(mode: str) -> str:
 def _set_audio_output(device: str | None = None) -> str:
     """Switch audio output device, or list sinks when device is omitted."""
     if device is None:
-        result = run_command("pactl list sinks short")
+        result = run_command(["pactl", "list", "sinks", "short"])
         return f"Available audio outputs:\n{result.stdout}\n\nUse sink name or index to switch."
 
     result = run_audited(
-        f"pactl set-default-sink {shlex.quote(device)}",
+        ["pactl", "set-default-sink", device],
         tool="quick_setting",
         args={"device": device},
     )
@@ -47,7 +52,7 @@ def _set_audio_output(device: str | None = None) -> str:
 def _set_power_profile(profile: str) -> str:
     """Switch power profile between performance, balanced, or power-saver."""
     result = run_audited(
-        f"powerprofilesctl set {profile}",
+        ["powerprofilesctl", "set", profile],
         tool="quick_setting",
         args={"profile": profile},
     )

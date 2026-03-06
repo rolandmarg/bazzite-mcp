@@ -14,9 +14,18 @@ from .accessibility import _atspi_call
 def _kwin_get_windows() -> list[dict]:
     """List windows via KWin WindowsRunner DBus interface."""
     result = run_command(
-        "gdbus call --session --dest org.kde.KWin "
-        "--object-path /WindowsRunner "
-        '--method org.kde.krunner1.Match " "'
+        [
+            "gdbus",
+            "call",
+            "--session",
+            "--dest",
+            "org.kde.KWin",
+            "--object-path",
+            "/WindowsRunner",
+            "--method",
+            "org.kde.krunner1.Match",
+            " ",
+        ]
     )
     if result.returncode != 0:
         raise ToolError(format_graphical_error("Failed to query KWin windows", result.stderr))
@@ -72,7 +81,7 @@ def _parse_window_info(raw: str) -> dict:
 def _kwin_get_window_info(uuid: str) -> dict:
     """Get detailed window info from KWin by UUID."""
     result = run_command(
-        f"qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo '{{{uuid}}}'"
+        ["qdbus", "org.kde.KWin", "/KWin", "org.kde.KWin.getWindowInfo", f"{{{uuid}}}"]
     )
     if result.returncode != 0:
         return {}
@@ -81,7 +90,9 @@ def _kwin_get_window_info(uuid: str) -> dict:
 
 def _kwin_query_window_info() -> dict:
     """Get detailed info for the active window from KWin."""
-    result = run_command("qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo")
+    result = run_command(
+        ["qdbus", "org.kde.KWin", "/KWin", "org.kde.KWin.queryWindowInfo"]
+    )
     if result.returncode != 0:
         return {}
     return _parse_window_info(result.stdout)
@@ -90,7 +101,14 @@ def _kwin_query_window_info() -> dict:
 def _kwin_activate(uuid: str) -> None:
     """Activate a window by UUID via KWin WindowsRunner."""
     result = run_command(
-        f"qdbus org.kde.KWin /WindowsRunner org.kde.krunner1.Run '0_{{{uuid}}}' ''"
+        [
+            "qdbus",
+            "org.kde.KWin",
+            "/WindowsRunner",
+            "org.kde.krunner1.Run",
+            f"0_{{{uuid}}}",
+            "",
+        ]
     )
     if result.returncode != 0:
         raise ToolError(format_graphical_error(f"Failed to activate window {uuid}", result.stderr))

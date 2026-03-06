@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
 from typing import Literal
 
@@ -15,7 +14,7 @@ def manage_quadlet(
     """Manage Quadlet units for persistent containerized services."""
     if action == "list":
         result = run_command(
-            "systemctl --user list-units --type=service 'podman-*' --no-pager 2>/dev/null"
+            ["systemctl", "--user", "list-units", "podman-*.service", "--type=service", "--no-pager"]
         )
         return result.stdout if result.stdout.strip() else "No Quadlet services found."
 
@@ -27,13 +26,13 @@ def manage_quadlet(
 
     if action == "status" and name:
         result = run_command(
-            f"systemctl --user status {shlex.quote(service_name(name))} --no-pager"
+            ["systemctl", "--user", "status", service_name(name), "--no-pager"]
         )
         return result.stdout
 
     if action in ("start", "stop") and name:
         result = run_audited(
-            f"systemctl --user {action} {shlex.quote(service_name(name))}",
+            ["systemctl", "--user", action, service_name(name)],
             tool="manage_quadlet",
             args={"action": action, "name": name},
         )
@@ -59,10 +58,9 @@ WantedBy=default.target
         unit_path.write_text(unit_content, encoding="utf-8")
 
         reload_result = run_audited(
-            "systemctl --user daemon-reload",
+            ["systemctl", "--user", "daemon-reload"],
             tool="manage_quadlet",
             args={"action": "create", "name": name, "image": image},
-            rollback=f"rm -f {shlex.quote(str(unit_path))}",
         )
         if reload_result.returncode != 0:
             raise ToolError(
@@ -85,13 +83,13 @@ WantedBy=default.target
         )
 
         stop_result = run_audited(
-            f"systemctl --user stop {shlex.quote(svc)}",
+            ["systemctl", "--user", "stop", svc],
             tool="manage_quadlet",
             args={"action": "remove-stop", "name": name},
         )
 
         disable_result = run_audited(
-            f"systemctl --user disable {shlex.quote(svc)}",
+            ["systemctl", "--user", "disable", svc],
             tool="manage_quadlet",
             args={"action": "remove-disable", "name": name},
         )
@@ -102,7 +100,7 @@ WantedBy=default.target
             removed_file = True
 
         reload_result = run_audited(
-            "systemctl --user daemon-reload",
+            ["systemctl", "--user", "daemon-reload"],
             tool="manage_quadlet",
             args={"action": "remove", "name": name},
         )

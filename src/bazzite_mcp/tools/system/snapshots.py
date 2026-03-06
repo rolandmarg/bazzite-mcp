@@ -8,7 +8,7 @@ from bazzite_mcp.runner import ToolError, run_command
 def _snapshot_list() -> str:
     """List btrfs snapshots of the home directory."""
     result = run_command(
-        "snapper -c home list --columns number,date,description,cleanup"
+        ["snapper", "-c", "home", "list", "--columns", "number,date,description,cleanup"]
     )
     if result.returncode != 0:
         raise ToolError(f"Error: {result.stderr}")
@@ -19,7 +19,7 @@ def _snapshot_status() -> str:
     """Show snapshot system status: retention policy, timer state, snapshot count."""
     lines: list[str] = []
 
-    config_result = run_command("snapper -c home get-config")
+    config_result = run_command(["snapper", "-c", "home", "get-config"])
     if config_result.returncode == 0:
         lines.append("RETENTION POLICY")
         for cfg_line in config_result.stdout.splitlines():
@@ -27,14 +27,16 @@ def _snapshot_status() -> str:
                 lines.append(f"  {cfg_line.strip()}")
         lines.append("")
 
-    timeline_result = run_command("systemctl is-active snapper-timeline.timer")
-    cleanup_result = run_command("systemctl is-active snapper-cleanup.timer")
+    timeline_result = run_command(["systemctl", "is-active", "snapper-timeline.timer"])
+    cleanup_result = run_command(["systemctl", "is-active", "snapper-cleanup.timer"])
     lines.append("TIMERS")
     lines.append(f"  snapper-timeline: {timeline_result.stdout.strip()}")
     lines.append(f"  snapper-cleanup:  {cleanup_result.stdout.strip()}")
     lines.append("")
 
-    list_result = run_command("snapper -c home list --columns number,date,cleanup")
+    list_result = run_command(
+        ["snapper", "-c", "home", "list", "--columns", "number,date,cleanup"]
+    )
     if list_result.returncode == 0:
         count = sum(
             1
@@ -49,7 +51,7 @@ def _snapshot_status() -> str:
 def _snapshot_diff(snapshot_id: int) -> str:
     """Show what files changed between a snapshot and the current state."""
     safe_id = max(1, int(snapshot_id))
-    result = run_command(f"snapper -c home status {safe_id}..0")
+    result = run_command(["snapper", "-c", "home", "status", f"{safe_id}..0"])
     if result.returncode != 0:
         raise ToolError(f"Error: {result.stderr}")
     return result.stdout

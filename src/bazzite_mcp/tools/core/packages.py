@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import subprocess
 from typing import Literal
 
@@ -10,14 +9,17 @@ from mcp.server.fastmcp.exceptions import ToolError
 from bazzite_mcp.runner import CommandResult, run_audited, run_command
 
 SEARCH_TIMEOUT_SECONDS = 20
+_HOMEBREW_ENV = {"HOMEBREW_NO_AUTO_UPDATE": "1"}
 
 
 def _run_search_command(
-    command: str, timeout: int = SEARCH_TIMEOUT_SECONDS
+    command: list[str],
+    timeout: int = SEARCH_TIMEOUT_SECONDS,
+    env: dict[str, str] | None = None,
 ) -> CommandResult:
     """Run a search/listing command with bounded timeout and graceful timeout handling."""
     try:
-        return run_command(command, timeout=timeout)
+        return run_command(command, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return CommandResult(
             returncode=124,
@@ -35,17 +37,16 @@ def _install_package(
 
 
 def _install_with_method(package: str, method: str) -> str:
-    pkg = shlex.quote(package)
     method_commands = {
-        "flatpak": f"flatpak install -y flathub {pkg}",
-        "brew": f"brew install {pkg}",
-        "rpm-ostree": f"rpm-ostree install {pkg}",
-        "ujust": f"ujust {pkg}",
+        "flatpak": ["flatpak", "install", "-y", "flathub", package],
+        "brew": ["brew", "install", package],
+        "rpm-ostree": ["rpm-ostree", "install", package],
+        "ujust": ["ujust", package],
     }
     rollback_commands = {
-        "flatpak": f"flatpak uninstall -y {pkg}",
-        "brew": f"brew uninstall {pkg}",
-        "rpm-ostree": f"rpm-ostree uninstall {pkg}",
+        "flatpak": ["flatpak", "uninstall", "-y", package],
+        "brew": ["brew", "uninstall", package],
+        "rpm-ostree": ["rpm-ostree", "uninstall", package],
     }
     if method not in method_commands:
         raise ToolError(
@@ -70,16 +71,15 @@ def _remove_package(
     package: str, method: str
 ) -> str:
     """Remove package via its original install method."""
-    pkg = shlex.quote(package)
     method_commands = {
-        "flatpak": f"flatpak uninstall -y {pkg}",
-        "brew": f"brew uninstall {pkg}",
-        "rpm-ostree": f"rpm-ostree uninstall {pkg}",
+        "flatpak": ["flatpak", "uninstall", "-y", package],
+        "brew": ["brew", "uninstall", package],
+        "rpm-ostree": ["rpm-ostree", "uninstall", package],
     }
     reinstall_commands = {
-        "flatpak": f"flatpak install -y flathub {pkg}",
-        "brew": f"brew install {pkg}",
-        "rpm-ostree": f"rpm-ostree install {pkg}",
+        "flatpak": ["flatpak", "install", "-y", "flathub", package],
+        "brew": ["brew", "install", package],
+        "rpm-ostree": ["rpm-ostree", "install", package],
     }
     if method not in method_commands:
         raise ToolError(
@@ -104,8 +104,7 @@ def _search_package(package: str) -> str:
     parts: list[str] = []
     timed_out: list[str] = []
 
-    pkg = shlex.quote(package)
-    ujust_check = _run_search_command("ujust --summary 2>/dev/null")
+    ujust_check = _run_search_command(["ujust", "--summary"])
     if ujust_check.returncode == 124:
         timed_out.append("ujust")
     if ujust_check.returncode == 0 and ujust_check.stdout.strip():
@@ -117,15 +116,13 @@ def _search_package(package: str) -> str:
         if matching_lines:
             parts.append("[ujust]\n" + "\n".join(matching_lines))
 
-    flatpak_check = _run_search_command(f"flatpak search {pkg} 2>/dev/null")
+    flatpak_check = _run_search_command(["flatpak", "search", package])
     if flatpak_check.returncode == 124:
         timed_out.append("flatpak")
     if flatpak_check.returncode == 0 and flatpak_check.stdout.strip():
         parts.append(f"[flatpak]\n{flatpak_check.stdout}")
 
-    brew_check = _run_search_command(
-        f"HOMEBREW_NO_AUTO_UPDATE=1 brew search {pkg} 2>/dev/null"
-    )
+    brew_check = _run_search_command(["brew", "search", package], env=_HOMEBREW_ENV)
     if brew_check.returncode == 124:
         timed_out.append("brew")
     if brew_check.returncode == 0 and brew_check.stdout.strip():
@@ -151,18 +148,18 @@ def _list_packages(
 
     if "flatpak" in sources:
         result = _run_search_command(
-            "flatpak list --app --columns=name,application,version 2>/dev/null"
+            ["flatpak", "list", "--app", "--columns=name,application,version"]
         )
         if result.returncode == 0 and result.stdout.strip():
             parts.append(f"=== Flatpak ===\n{result.stdout}")
 
     if "brew" in sources:
-        result = _run_search_command("HOMEBREW_NO_AUTO_UPDATE=1 brew list 2>/dev/null")
+        result = _run_search_command(["brew", "list"], env=_HOMEBREW_ENV)
         if result.returncode == 0 and result.stdout.strip():
             parts.append(f"=== Homebrew ===\n{result.stdout}")
 
     if "rpm-ostree" in sources:
-        result = _run_search_command("rpm-ostree status --json 2>/dev/null")
+        result = _run_search_command(["rpm-ostree", "status", "--json"])
         if result.returncode == 0:
             layered = "No layered packages"
             try:
@@ -183,17 +180,17 @@ def _update_packages(source: str | None = None) -> str:
     """Update packages by source, or run full system update if omitted."""
     if source in (None, "system"):
         result = run_audited(
-            "ujust update", tool="packages", args={"source": "system"}
+            ["ujust", "update"], tool="packages", args={"source": "system"}
         )
         return f"System update:\n{result.stdout}"
     if source == "flatpak":
         result = run_audited(
-            "flatpak update -y", tool="packages", args={"source": "flatpak"}
+            ["flatpak", "update", "-y"], tool="packages", args={"source": "flatpak"}
         )
         return f"Flatpak update:\n{result.stdout}"
     if source == "brew":
         result = run_audited(
-            "brew upgrade", tool="packages", args={"source": "brew"}
+            ["brew", "upgrade"], tool="packages", args={"source": "brew"}, env=_HOMEBREW_ENV
         )
         return f"Brew update:\n{result.stdout}"
     raise ToolError(

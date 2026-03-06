@@ -49,7 +49,8 @@ def test_search_package_sets_brew_no_auto_update(mock_run: MagicMock) -> None:
     result = _search_package("virt-manager")
     assert "No results" in result
     assert any(
-        "HOMEBREW_NO_AUTO_UPDATE=1 brew search" in str(call.args[0])
+        call.args[0] == ["brew", "search", "virt-manager"]
+        and call.kwargs.get("env") == {"HOMEBREW_NO_AUTO_UPDATE": "1"}
         for call in mock_run.call_args_list
     )
 

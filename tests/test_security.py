@@ -204,11 +204,10 @@ class TestToolIntegration:
 
     def test_manage_firewall_port_injection(self) -> None:
         """Port strings with shell injection should be blocked."""
+        from bazzite_mcp.runner import ToolError
         from bazzite_mcp.tools.services import manage_firewall
 
-        # The port gets shlex.quote'd, so the injection is neutralized,
-        # but the command still passes through guardrails
-        with pytest.raises(GuardrailError):
+        with pytest.raises(ToolError, match="Invalid port spec"):
             manage_firewall("add_port", port="8080/tcp; rm -rf /")
 
     def test_run_command_blocks_before_subprocess(self) -> None:

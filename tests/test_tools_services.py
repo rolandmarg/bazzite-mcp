@@ -38,7 +38,7 @@ def test_manage_service_start(mock_audited: MagicMock) -> None:
     assert "successful" in result.lower()
     # Verify the rollback for start is stop
     _, kwargs = mock_audited.call_args
-    assert "stop" in kwargs.get("rollback", "")
+    assert "stop" in kwargs.get("rollback", [])
 
 
 @patch("bazzite_mcp.tools.services.systemd.run_audited")
@@ -47,7 +47,7 @@ def test_manage_service_stop(mock_audited: MagicMock) -> None:
     result = manage_service("bluetooth.service", "stop")
     assert "successful" in result.lower()
     _, kwargs = mock_audited.call_args
-    assert "start" in kwargs.get("rollback", "")
+    assert "start" in kwargs.get("rollback", [])
 
 
 @patch("bazzite_mcp.tools.services.systemd.run_audited")
@@ -56,7 +56,7 @@ def test_manage_service_enable(mock_audited: MagicMock) -> None:
     result = manage_service("bluetooth.service", "enable")
     assert "successful" in result.lower()
     _, kwargs = mock_audited.call_args
-    assert "disable" in kwargs.get("rollback", "")
+    assert "disable" in kwargs.get("rollback", [])
 
 
 @patch("bazzite_mcp.tools.services.systemd.run_audited")
@@ -65,7 +65,7 @@ def test_manage_service_disable(mock_audited: MagicMock) -> None:
     result = manage_service("bluetooth.service", "disable")
     assert "successful" in result.lower()
     _, kwargs = mock_audited.call_args
-    assert "enable" in kwargs.get("rollback", "")
+    assert "enable" in kwargs.get("rollback", [])
 
 
 @patch("bazzite_mcp.tools.services.systemd.run_command")
@@ -93,7 +93,7 @@ def test_manage_service_rollback_command_construction(mock_audited: MagicMock) -
     mock_audited.return_value = CommandResult(returncode=0, stdout="", stderr="")
     manage_service("sshd", "enable_now", user=True)
     _, kwargs = mock_audited.call_args
-    assert kwargs["rollback"] == "systemctl --user disable --now sshd"
+    assert kwargs["rollback"] == ["systemctl", "--user", "disable", "--now", "sshd"]
 
 
 # --- manage_firewall tests ---
@@ -107,10 +107,10 @@ def test_manage_firewall_add_port(mock_audited: MagicMock) -> None:
     assert mock_audited.call_count == 2
     # Verify the command includes the port
     args, kwargs = mock_audited.call_args_list[0]
-    assert "add-port=8080/tcp" in args[0]
+    assert "--add-port=8080/tcp" in args[0]
     # Verify rollback is remove-port
-    assert "remove-port=8080/tcp" in kwargs["rollback"]
-    assert mock_audited.call_args_list[1].args[0] == "pkexec firewall-cmd --reload"
+    assert "--remove-port=8080/tcp" in kwargs["rollback"]
+    assert mock_audited.call_args_list[1].args[0] == ["pkexec", "firewall-cmd", "--reload"]
 
 
 @patch("bazzite_mcp.tools.services.firewall.run_audited")
@@ -120,9 +120,9 @@ def test_manage_firewall_remove_port(mock_audited: MagicMock) -> None:
     assert "success" in result
     assert mock_audited.call_count == 2
     args, kwargs = mock_audited.call_args_list[0]
-    assert "remove-port=8080/tcp" in args[0]
+    assert "--remove-port=8080/tcp" in args[0]
     # Rollback for remove-port is add-port
-    assert "add-port=8080/tcp" in kwargs["rollback"]
+    assert "--add-port=8080/tcp" in kwargs["rollback"]
 
 
 @patch("bazzite_mcp.tools.services.firewall.run_audited")
@@ -132,11 +132,11 @@ def test_manage_firewall_rollback_inverse_mapping(mock_audited: MagicMock) -> No
 
     manage_firewall("add_service", service="http")
     _, kwargs = mock_audited.call_args_list[0]
-    assert "remove-service=http" in kwargs["rollback"]
+    assert "--remove-service=http" in kwargs["rollback"]
 
     manage_firewall("remove_service", service="http")
     _, kwargs = mock_audited.call_args_list[2]
-    assert "add-service=http" in kwargs["rollback"]
+    assert "--add-service=http" in kwargs["rollback"]
 
 
 # --- manage_network dispatcher tests ---

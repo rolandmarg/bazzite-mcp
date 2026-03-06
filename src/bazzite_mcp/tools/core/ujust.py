@@ -6,9 +6,9 @@ from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 def _ujust_list(filter: str | None = None) -> str:
     """List available ujust commands, optionally filtered by keyword."""
-    result = run_command("ujust --summary")
+    result = run_command(["ujust", "--summary"])
     if result.returncode != 0:
-        result = run_command("ujust")
+        result = run_command(["ujust"])
         if result.returncode != 0:
             raise ToolError(f"Error listing ujust commands: {result.stderr}")
 
@@ -20,7 +20,7 @@ def _ujust_list(filter: str | None = None) -> str:
 
 def _ujust_show(command: str) -> str:
     """Show the source script of a ujust command before running it."""
-    result = run_command(f"ujust --show {shlex.quote(command)}")
+    result = run_command(["ujust", "--show", command])
     if result.returncode != 0:
         raise ToolError(f"Error showing command '{command}': {result.stderr}")
     return result.stdout
@@ -38,15 +38,15 @@ def _ujust_run(command: str) -> str:
 
     recipe = parts[0]
     if len(parts) >= 2 and parts[1] in {"help", "--help", "-h"}:
-        usage = run_command(f"ujust --usage {shlex.quote(recipe)}")
+        usage = run_command(["ujust", "--usage", recipe])
         if usage.returncode == 0 and usage.stdout.strip():
             return usage.stdout
-        fallback = run_command(f"ujust --show {shlex.quote(recipe)}")
+        fallback = run_command(["ujust", "--show", recipe])
         if fallback.returncode == 0 and fallback.stdout.strip():
             return fallback.stdout
         raise ToolError(f"Could not retrieve usage for '{recipe}'.")
 
-    recipe_source = run_command(f"ujust --show {shlex.quote(recipe)}")
+    recipe_source = run_command(["ujust", "--show", recipe])
     if (
         recipe_source.returncode == 0
         and len(parts) == 1
@@ -58,7 +58,7 @@ def _ujust_run(command: str) -> str:
         )
 
     result = run_audited(
-        f"ujust {shlex.join(parts)}",
+        ["ujust", *parts],
         tool="ujust",
         args={"command": command},
     )

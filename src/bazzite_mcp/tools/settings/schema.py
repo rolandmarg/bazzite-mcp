@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
@@ -8,7 +7,7 @@ from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 def _get_settings(schema: str, key: str) -> str:
     """Read a gsettings value."""
-    result = run_command(f"gsettings get {shlex.quote(schema)} {shlex.quote(key)}")
+    result = run_command(["gsettings", "get", schema, key])
     if result.returncode != 0:
         raise ToolError(f"Error reading {schema} {key}: {result.stderr}")
     return result.stdout
@@ -17,7 +16,7 @@ def _get_settings(schema: str, key: str) -> str:
 def _set_settings(schema: str, key: str, value: str) -> str:
     """Write a gsettings value."""
     result = run_audited(
-        f"gsettings set {shlex.quote(schema)} {shlex.quote(key)} {shlex.quote(value)}",
+        ["gsettings", "set", schema, key, value],
         tool="gsettings",
         args={"schema": schema, "key": key, "value": value},
     )

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-import shlex
+import re
 from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
+
+_PORT_RE = re.compile(r"^\d+(?:-\d+)?/(tcp|udp)$")
+_SERVICE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def manage_firewall(
@@ -13,29 +16,33 @@ def manage_firewall(
 ) -> str:
     """Manage firewalld rules with audit logging and reload."""
     if action == "list":
-        result = run_command("firewall-cmd --list-all")
+        result = run_command(["firewall-cmd", "--list-all"])
         if result.returncode != 0:
             raise ToolError(f"Error: {result.stderr}")
         return result.stdout
 
-    primary_cmd = ""
-    rollback_cmd = ""
+    primary_cmd: list[str] | None = None
+    rollback_cmd: list[str] | None = None
     if action == "add_port" and port:
-        sport = shlex.quote(port)
-        primary_cmd = f"pkexec firewall-cmd --add-port={sport} --permanent"
-        rollback_cmd = f"pkexec firewall-cmd --remove-port={sport} --permanent"
+        if not _PORT_RE.match(port):
+            raise ToolError(f"Invalid port spec '{port}'. Use forms like 8080/tcp.")
+        primary_cmd = ["pkexec", "firewall-cmd", f"--add-port={port}", "--permanent"]
+        rollback_cmd = ["pkexec", "firewall-cmd", f"--remove-port={port}", "--permanent"]
     elif action == "remove_port" and port:
-        sport = shlex.quote(port)
-        primary_cmd = f"pkexec firewall-cmd --remove-port={sport} --permanent"
-        rollback_cmd = f"pkexec firewall-cmd --add-port={sport} --permanent"
+        if not _PORT_RE.match(port):
+            raise ToolError(f"Invalid port spec '{port}'. Use forms like 8080/tcp.")
+        primary_cmd = ["pkexec", "firewall-cmd", f"--remove-port={port}", "--permanent"]
+        rollback_cmd = ["pkexec", "firewall-cmd", f"--add-port={port}", "--permanent"]
     elif action == "add_service" and service:
-        ssvc = shlex.quote(service)
-        primary_cmd = f"pkexec firewall-cmd --add-service={ssvc} --permanent"
-        rollback_cmd = f"pkexec firewall-cmd --remove-service={ssvc} --permanent"
+        if not _SERVICE_RE.match(service):
+            raise ToolError(f"Invalid service name '{service}'.")
+        primary_cmd = ["pkexec", "firewall-cmd", f"--add-service={service}", "--permanent"]
+        rollback_cmd = ["pkexec", "firewall-cmd", f"--remove-service={service}", "--permanent"]
     elif action == "remove_service" and service:
-        ssvc = shlex.quote(service)
-        primary_cmd = f"pkexec firewall-cmd --remove-service={ssvc} --permanent"
-        rollback_cmd = f"pkexec firewall-cmd --add-service={ssvc} --permanent"
+        if not _SERVICE_RE.match(service):
+            raise ToolError(f"Invalid service name '{service}'.")
+        primary_cmd = ["pkexec", "firewall-cmd", f"--remove-service={service}", "--permanent"]
+        rollback_cmd = ["pkexec", "firewall-cmd", f"--add-service={service}", "--permanent"]
     else:
         raise ToolError(
             "Usage: action='list|add_port|remove_port|add_service|remove_service'"
@@ -51,7 +58,7 @@ def manage_firewall(
         raise ToolError(f"Error: {change_result.stderr}")
 
     reload_result = run_audited(
-        "pkexec firewall-cmd --reload",
+        ["pkexec", "firewall-cmd", "--reload"],
         tool="manage_firewall",
         args={"action": "reload", "triggered_by": action},
     )

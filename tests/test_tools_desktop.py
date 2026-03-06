@@ -47,8 +47,7 @@ def test_screenshot_window_default_captures_active(
         m = MagicMock()
         m.returncode = 0
         if "spectacle" in cmd:
-            import re as _re
-            path = _re.search(r"-o\s+(\S+)", cmd).group(1)
+            path = cmd[cmd.index("-o") + 1]
             _write_png(Path(path), 640, 480)
         return m
     mock_run.side_effect = fake_run
@@ -86,8 +85,7 @@ def test_screenshot_window_with_name_activates_first(
         m = MagicMock()
         m.returncode = 0
         if "spectacle" in cmd:
-            import re as _re
-            path = _re.search(r"-o\s+(\S+)", cmd).group(1)
+            path = cmd[cmd.index("-o") + 1]
             _write_png(Path(path), 320, 240)
         return m
     mock_run.side_effect = fake_run
@@ -110,8 +108,7 @@ def test_screenshot_desktop_target(mock_run: MagicMock) -> None:
         m = MagicMock()
         m.returncode = 0
         if "spectacle" in cmd:
-            import re as _re
-            path = _re.search(r"-o\s+(\S+)", cmd).group(1)
+            path = cmd[cmd.index("-o") + 1]
             _write_png(Path(path), 1920, 1080)
         return m
 

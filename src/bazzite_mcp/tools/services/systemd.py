@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
@@ -8,8 +7,11 @@ from bazzite_mcp.runner import ToolError, run_audited, run_command
 
 def _service_status(name: str, user: bool = False) -> str:
     """Get status of a systemd service."""
-    scope = "--user" if user else ""
-    result = run_command(f"systemctl {scope} status {shlex.quote(name)} --no-pager")
+    command = ["systemctl"]
+    if user:
+        command.append("--user")
+    command.extend(["status", name, "--no-pager"])
+    result = run_command(command)
     return result.stdout if result.stdout else result.stderr
 
 
@@ -18,17 +20,16 @@ def _list_services(
     user: bool = False,
 ) -> str:
     """List systemd services, optionally filtered by state."""
-    scope = "--user" if user else ""
+    command = ["systemctl"]
+    if user:
+        command.append("--user")
     if state in ("running", "failed"):
-        result = run_command(
-            f"systemctl {scope} list-units --type=service --state={shlex.quote(state)} --no-pager"
-        )
+        command.extend(["list-units", "--type=service", f"--state={state}", "--no-pager"])
     elif state in ("enabled", "disabled"):
-        result = run_command(
-            f"systemctl {scope} list-unit-files --type=service --state={shlex.quote(state)} --no-pager"
-        )
+        command.extend(["list-unit-files", "--type=service", f"--state={state}", "--no-pager"])
     else:
-        result = run_command(f"systemctl {scope} list-units --type=service --no-pager")
+        command.extend(["list-units", "--type=service", "--no-pager"])
+    result = run_command(command)
     return result.stdout
 
 
@@ -52,8 +53,6 @@ def manage_service(
     if not name:
         raise ToolError(f"'name' is required for action='{action}'.")
 
-    scope = "--user" if user else ""
-    sname = shlex.quote(name)
     reverse = {
         "start": "stop",
         "stop": "start",
@@ -62,12 +61,27 @@ def manage_service(
         "enable_now": "disable_now",
         "disable_now": "enable_now",
     }.get(action)
-    command_action = action.replace("_now", " --now")
-    rollback_cmd = f"systemctl {scope} {reverse} {sname}" if reverse else None
-    if rollback_cmd:
-        rollback_cmd = rollback_cmd.replace("_now", " --now")
+    command = ["systemctl"]
+    if user:
+        command.append("--user")
+    if action.endswith("_now"):
+        command.extend([action.replace("_now", ""), "--now"])
+    else:
+        command.append(action)
+    command.append(name)
+
+    rollback_cmd: list[str] | None = None
+    if reverse:
+        rollback_cmd = ["systemctl"]
+        if user:
+            rollback_cmd.append("--user")
+        if reverse.endswith("_now"):
+            rollback_cmd.extend([reverse.replace("_now", ""), "--now"])
+        else:
+            rollback_cmd.append(reverse)
+        rollback_cmd.append(name)
     result = run_audited(
-        f"systemctl {scope} {command_action} {sname}",
+        command,
         tool="manage_service",
         args={"name": name, "action": action, "user": user},
         rollback=rollback_cmd,

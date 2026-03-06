@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import shlex
+from pathlib import Path
 
 from bazzite_mcp.runner import run_command
 
@@ -31,8 +31,17 @@ def storage_diagnostics() -> str:
     lines: list[str] = []
 
     df_result = run_command(
-        "df --block-size=1M --output=source,size,used,avail,pcent,target "
-        "-x tmpfs -x devtmpfs -x squashfs"
+        [
+            "df",
+            "--block-size=1M",
+            "--output=source,size,used,avail,pcent,target",
+            "-x",
+            "tmpfs",
+            "-x",
+            "devtmpfs",
+            "-x",
+            "squashfs",
+        ]
     )
 
     partitions: dict[str, dict] = {}
@@ -64,7 +73,7 @@ def storage_diagnostics() -> str:
     used_mb = main["used"] if main else 0
     free_mb = main["avail"] if main else 0
 
-    home_total_result = run_command("du -sm $HOME", timeout=90)
+    home_total_result = run_command(["du", "-sm", str(Path.home())], timeout=90)
     home_total_mb = 0
     if home_total_result.stdout:
         try:
@@ -91,8 +100,8 @@ def storage_diagnostics() -> str:
         (".local/share/Trash", "Trash"),
     ]
 
-    paths_str = " ".join(f"$HOME/{suffix}" for suffix, _ in home_dirs)
-    du_result = run_command(f"du -sm {paths_str}", timeout=60)
+    home_paths = [str(Path.home() / suffix) for suffix, _ in home_dirs]
+    du_result = run_command(["du", "-sm", *home_paths], timeout=60)
 
     dir_sizes: list[tuple[str, int]] = []
     if du_result.stdout:
@@ -148,30 +157,30 @@ def storage_diagnostics() -> str:
         )
     lines.append("")
 
-    flatpak_result = run_command("flatpak list --columns=name,size")
+    flatpak_result = run_command(["flatpak", "list", "--columns=name,size"])
     if flatpak_result.returncode == 0 and flatpak_result.stdout.strip():
         lines.append("FLATPAK APPS (installed size)")
         for flatpak_line in flatpak_result.stdout.strip().splitlines():
             lines.append(f"  {flatpak_line}")
         lines.append("")
 
-    podman_result = run_command("podman system df")
+    podman_result = run_command(["podman", "system", "df"])
     if podman_result.returncode == 0 and podman_result.stdout.strip():
         lines.append("PODMAN STORAGE")
         for podman_line in podman_result.stdout.strip().splitlines():
             lines.append(f"  {podman_line}")
         lines.append("")
 
-    journal_result = run_command("journalctl --disk-usage")
+    journal_result = run_command(["journalctl", "--disk-usage"])
     if journal_result.returncode == 0:
         lines.append(f"JOURNAL LOGS: {journal_result.stdout.strip()}")
         lines.append("")
 
     brew_cache_mb = 0
-    brew_result = run_command("brew --cache")
+    brew_result = run_command(["brew", "--cache"], env={"HOMEBREW_NO_AUTO_UPDATE": "1"})
     if brew_result.returncode == 0 and brew_result.stdout.strip():
         brew_cache_path = brew_result.stdout.strip()
-        brew_du = run_command(f"du -sm {shlex.quote(brew_cache_path)}", timeout=30)
+        brew_du = run_command(["du", "-sm", brew_cache_path], timeout=30)
         if brew_du.returncode == 0:
             try:
                 brew_cache_mb = int(brew_du.stdout.split("\t")[0])
@@ -190,7 +199,7 @@ def system_doctor() -> str:
 
     lines.append("SECURITY")
 
-    fw_result = run_command("firewall-cmd --get-default-zone")
+    fw_result = run_command(["firewall-cmd", "--get-default-zone"])
     if fw_result.returncode == 0:
         zone = fw_result.stdout.strip()
         if zone == "public":
@@ -200,7 +209,7 @@ def system_doctor() -> str:
     else:
         lines.append("  FAIL  Firewall: could not query")
 
-    svc_result = run_command("firewall-cmd --list-services")
+    svc_result = run_command(["firewall-cmd", "--list-services"])
     if svc_result.returncode == 0:
         services = set(svc_result.stdout.strip().split())
         expected = {"dhcpv6-client"}
@@ -212,9 +221,9 @@ def system_doctor() -> str:
 
     dns_parts: list[str] = []
     dns_ok = True
-    resolve_result = run_command("systemctl is-active systemd-resolved")
+    resolve_result = run_command(["systemctl", "is-active", "systemd-resolved"])
     if resolve_result.stdout.strip() == "active":
-        resolvectl = run_command("resolvectl status")
+        resolvectl = run_command(["resolvectl", "status"])
         if resolvectl.returncode == 0:
             if "DNSOverTLS" in resolvectl.stdout and (
                 "+DNSOverTLS" in resolvectl.stdout
@@ -225,7 +234,7 @@ def system_doctor() -> str:
                 dns_parts.append("DoTLS active")
             else:
                 cfg_result = run_command(
-                    "cat /etc/systemd/resolved.conf.d/20-encrypted-dns.conf"
+                    ["cat", "/etc/systemd/resolved.conf.d/20-encrypted-dns.conf"]
                 )
                 if cfg_result.returncode == 0 and "DNSOverTLS=yes" in cfg_result.stdout:
                     dns_parts.append("DoTLS configured")
@@ -234,7 +243,7 @@ def system_doctor() -> str:
                     dns_ok = False
 
         llmnr_result = run_command(
-            "cat /etc/systemd/resolved.conf.d/10-network-hardening.conf"
+            ["cat", "/etc/systemd/resolved.conf.d/10-network-hardening.conf"]
         )
         if llmnr_result.returncode == 0:
             content = llmnr_result.stdout
@@ -261,7 +270,7 @@ def system_doctor() -> str:
     sysctl_failures: list[str] = []
     for key, expected_val in sysctl_checks.items():
         proc_path = f"/proc/sys/{key.replace('.', '/')}"
-        sysctl_result = run_command(f"cat {proc_path}")
+        sysctl_result = run_command(["cat", proc_path])
         if sysctl_result.returncode == 0:
             actual = sysctl_result.stdout.strip()
             if actual != expected_val:
@@ -277,7 +286,7 @@ def system_doctor() -> str:
     lines.append("")
     lines.append("HEALTH")
 
-    failed_result = run_command("systemctl --failed --no-legend")
+    failed_result = run_command(["systemctl", "--failed", "--no-legend"])
     if failed_result.returncode == 0:
         failed_lines = [
             line for line in failed_result.stdout.strip().splitlines() if line.strip()
@@ -298,8 +307,17 @@ def system_doctor() -> str:
         lines.append("  PASS  No failed systemd units")
 
     df_result = run_command(
-        "df --block-size=1M --output=size,used,avail,pcent,target "
-        "-x tmpfs -x devtmpfs -x squashfs"
+        [
+            "df",
+            "--block-size=1M",
+            "--output=size,used,avail,pcent,target",
+            "-x",
+            "tmpfs",
+            "-x",
+            "devtmpfs",
+            "-x",
+            "squashfs",
+        ]
     )
     if df_result.returncode == 0:
         best_size = 0
@@ -319,7 +337,7 @@ def system_doctor() -> str:
         status = "PASS" if pct < 80 else ("WARN" if pct < 90 else "FAIL")
         lines.append(f"  {status}  Disk: {pct}% used ({_fmt_size(free_mb)} free)")
 
-    podman_result = run_command("podman system df")
+    podman_result = run_command(["podman", "system", "df"])
     if podman_result.returncode == 0:
         for podman_line in podman_result.stdout.splitlines():
             if "images" in podman_line.lower():
@@ -336,9 +354,9 @@ def system_doctor() -> str:
                         break
                 break
 
-    snap_timer = run_command("systemctl is-active snapper-timeline.timer")
+    snap_timer = run_command(["systemctl", "is-active", "snapper-timeline.timer"])
     if snap_timer.stdout.strip() == "active":
-        snap_list = run_command("snapper -c home list --columns number")
+        snap_list = run_command(["snapper", "-c", "home", "list", "--columns", "number"])
         if snap_list.returncode == 0:
             count = sum(
                 1
@@ -351,7 +369,7 @@ def system_doctor() -> str:
     else:
         lines.append("  FAIL  Snapshots: timeline timer not active")
 
-    journal_result = run_command("journalctl --disk-usage")
+    journal_result = run_command(["journalctl", "--disk-usage"])
     if journal_result.returncode == 0:
         journal_text = journal_result.stdout.strip()
         if "G" in journal_text.split("up")[-1] if "up" in journal_text else "":
@@ -360,7 +378,7 @@ def system_doctor() -> str:
             lines.append(f"  PASS  {journal_text}")
 
     for svc_name, label in [("avahi-daemon", "Avahi"), ("cups.socket", "CUPS")]:
-        svc_check = run_command(f"systemctl is-enabled {svc_name}")
+        svc_check = run_command(["systemctl", "is-enabled", svc_name])
         state = svc_check.stdout.strip()
         if state == "disabled":
             lines.append(f"  INFO  {label}: disabled")

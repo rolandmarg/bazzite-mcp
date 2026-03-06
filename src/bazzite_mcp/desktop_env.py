@@ -133,7 +133,9 @@ def get_graphical_env() -> dict[str, str]:
 
 def build_command_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Merge the recovered graphical environment into a subprocess env."""
-    env = dict(base or os.environ)
+    env = dict(os.environ)
+    if base:
+        env.update(base)
     env.update(get_graphical_env())
     return env
 

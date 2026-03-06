@@ -16,7 +16,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 @lru_cache(maxsize=1)
 def get_monitor_info() -> dict[str, dict]:
     """Parse monitor positions and sizes from kscreen-doctor."""
-    result = run_command("kscreen-doctor --outputs")
+    result = run_command(["kscreen-doctor", "--outputs"])
     if result.returncode != 0:
         logger.warning("kscreen-doctor failed: %s", result.stderr)
         return {}
