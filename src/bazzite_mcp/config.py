@@ -56,6 +56,7 @@ def _load_env_file() -> None:
 class Config:
     docs_base_url: str = "https://docs.bazzite.gg"
     github_releases_url: str = "https://github.com/ublue-os/bazzite/releases"
+    github_repo_url: str = "https://github.com/ublue-os/bazzite"
 
     # Audit
     audit_output_max_chars: int = 2000
@@ -65,6 +66,8 @@ class Config:
             raise ValueError("docs_base_url must not be empty")
         if not self.github_releases_url:
             raise ValueError("github_releases_url must not be empty")
+        if not self.github_repo_url:
+            raise ValueError("github_repo_url must not be empty")
 
     def __post_init__(self) -> None:
         self.validate()

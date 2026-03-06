@@ -7,6 +7,7 @@ from bazzite_mcp.resources import (
     get_game_optimization,
     get_install_policy,
     get_knowledge_index,
+    get_repo_sources,
     get_server_info,
     get_system_overview,
     get_tool_routing,
@@ -84,6 +85,11 @@ mcp.resource(
     description="Gaming and optimization guidance for Bazzite systems",
     mime_type="text/markdown",
 )(get_game_optimization)
+mcp.resource(
+    "bazzite://knowledge/repo-sources",
+    description="Canonical Bazzite GitHub source tree and code entry points",
+    mime_type="text/markdown",
+)(get_repo_sources)
 mcp.resource(
     "bazzite://server/info",
     description="bazzite-mcp server metadata: config, cache status, versions",

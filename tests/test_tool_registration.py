@@ -15,3 +15,4 @@ def test_server_resources_exclude_policy_uris() -> None:
     assert "bazzite://install/policy" not in uris
     assert "bazzite://knowledge/index" in uris
     assert "bazzite://knowledge/install-policy" in uris
+    assert "bazzite://knowledge/repo-sources" in uris

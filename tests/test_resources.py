@@ -1,6 +1,7 @@
 from bazzite_mcp.resources import (
     get_install_policy,
     get_knowledge_index,
+    get_repo_sources,
     get_server_info,
     get_system_overview,
 )
@@ -11,6 +12,7 @@ def test_server_info_contains_metadata():
     assert "bazzite-mcp" in result
     assert "Docs mode" in result
     assert "Official docs" in result
+    assert "Official source repo" in result
 
 
 def test_system_overview_contains_system_data():
@@ -21,11 +23,20 @@ def test_system_overview_contains_system_data():
 def test_knowledge_index_contains_resources_and_sources() -> None:
     result = get_knowledge_index()
     assert "bazzite://knowledge/install-policy" in result
+    assert "bazzite://knowledge/repo-sources" in result
     assert "bazzite://knowledge/troubleshooting" in result
     assert "https://docs.bazzite.gg" in result
+    assert "https://github.com/ublue-os/bazzite" in result
 
 
 def test_install_policy_resource_contains_heading() -> None:
     result = get_install_policy()
     assert result.startswith("# Install Policy")
     assert "rpm-ostree" in result
+
+
+def test_repo_sources_resource_contains_repo_links() -> None:
+    result = get_repo_sources()
+    assert result.startswith("# Repo Sources")
+    assert "https://github.com/ublue-os/bazzite" in result
+    assert "Do not rely on MCP to mirror or index repo structure" in result

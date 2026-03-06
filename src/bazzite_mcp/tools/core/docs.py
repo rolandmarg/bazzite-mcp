@@ -21,7 +21,7 @@ _REFERENCE_CONTENT = {
     "tool-routing": """
 - Use MCP for live state, guarded host changes, screenshots, services, packages, containers, VMs, and gaming settings.
 - Use local knowledge resources for install policy, troubleshooting, and execution-model guidance.
-- Use official docs for deeper platform reference when the built-in knowledge resources are insufficient.
+- Use official docs and source repo pointers for deeper platform reference when the built-in knowledge resources are insufficient.
 """.strip(),
     "troubleshooting": """
 1. Gather `system_info(detail="basic")`.
@@ -29,7 +29,7 @@ _REFERENCE_CONTENT = {
 3. Run `system_doctor()` for broad checks.
 4. Inspect service state with `manage_service(action="status", ...)`.
 5. Search built-in knowledge with `docs(action="search", query=...)`.
-6. Follow official source pointers when deeper Bazzite reference is needed.
+6. Follow official docs and source repo pointers when deeper Bazzite reference is needed.
 """.strip(),
     "dev-environments": """
 - Keep the immutable host lean.
@@ -94,6 +94,14 @@ def _knowledge_documents() -> list[KnowledgeDocument]:
             resource_uri="bazzite://knowledge/game-optimization",
         ),
         KnowledgeDocument(
+            title="Repo Sources",
+            summary="Canonical Bazzite GitHub source repo for live code-first reference.",
+            body=_repo_sources_body(cfg),
+            tags=("github", "repo", "source", "code"),
+            resource_uri="bazzite://knowledge/repo-sources",
+            source_url=cfg.github_repo_url,
+        ),
+        KnowledgeDocument(
             title="Official Docs",
             summary="Canonical Bazzite documentation home.",
             body=(
@@ -114,6 +122,18 @@ def _knowledge_documents() -> list[KnowledgeDocument]:
             source_url=cfg.github_releases_url,
         ),
     ]
+
+
+def _repo_sources_body(cfg) -> str:
+    repo = cfg.github_repo_url.rstrip("/")
+    return "\n".join(
+        [
+            f"- Repository root: {repo}",
+            "- Use the live GitHub repo for code-first documentation, current file paths, commit history, and search.",
+            "- Do not rely on MCP to mirror or index repo structure; browse the upstream repo directly when code details matter.",
+            "- Prefer the repo over summaries when you need to confirm how the image is assembled or where a behavior comes from.",
+        ]
+    )
 
 
 def _terms(query: str) -> list[str]:
@@ -169,13 +189,16 @@ def knowledge_resource_markdown(slug: str) -> str:
         "troubleshooting": "Troubleshooting",
         "dev-environments": "Dev Environments",
         "game-optimization": "Game Optimization",
+        "repo-sources": "Repo Sources",
     }
     title = mapping[slug]
+    if slug == "repo-sources":
+        return f"# {title}\n\n{_repo_sources_body(load_config())}"
     return f"# {title}\n\n{_REFERENCE_CONTENT[slug]}"
 
 
 async def _query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
-    """Search local Bazzite knowledge and return official source pointers."""
+    """Search local Bazzite knowledge and return official doc and repo pointers."""
     terms = _terms(query)
     if not terms:
         return "No searchable terms in query."
@@ -194,6 +217,7 @@ async def _query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
         return (
             f"No local knowledge results for '{query}'.\n\n"
             f"Official docs: {load_config().docs_base_url}\n"
+            f"Official source repo: {load_config().github_repo_url}\n"
             "Use the local knowledge resources for install policy and troubleshooting guidance."
         )
 
@@ -234,7 +258,7 @@ async def refresh_docs_cache(ctx: Context | None = None) -> str:
         await ctx.report_progress(1, 1)
     return (
         "No-op: local docs crawling and cache refresh were removed. "
-        "Use the built-in knowledge resources at bazzite://knowledge/* and the official Bazzite docs URL instead."
+        "Use the built-in knowledge resources at bazzite://knowledge/* plus the official Bazzite docs and repo URLs instead."
     )
 
 

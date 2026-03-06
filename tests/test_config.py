@@ -9,6 +9,7 @@ def test_config_defaults():
     cfg = Config()
     assert cfg.docs_base_url == "https://docs.bazzite.gg"
     assert "github.com/ublue-os/bazzite/releases" in cfg.github_releases_url
+    assert cfg.github_repo_url == "https://github.com/ublue-os/bazzite"
     assert cfg.audit_output_max_chars == 2000
 
 
@@ -31,6 +32,11 @@ def test_loads_env_file_when_present(tmp_path, monkeypatch):
 def test_config_validation_rejects_empty_docs_base_url():
     with pytest.raises(ValueError, match="docs_base_url"):
         Config(docs_base_url="")
+
+
+def test_config_validation_rejects_empty_repo_url():
+    with pytest.raises(ValueError, match="github_repo_url"):
+        Config(github_repo_url="")
 
 
 def test_load_config_raises_on_malformed_toml(tmp_path, monkeypatch):

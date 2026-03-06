@@ -39,12 +39,17 @@ def get_game_optimization() -> str:
     return knowledge_resource_markdown("game-optimization")
 
 
+def get_repo_sources() -> str:
+    return knowledge_resource_markdown("repo-sources")
+
+
 def get_server_info() -> str:
     """bazzite-mcp server metadata."""
     cfg = load_config()
     return (
         f"# bazzite-mcp v{__version__}\n\n"
-        f"Docs mode: lightweight knowledge resources\n"
+        f"Docs mode: lightweight knowledge resources plus repo pointers\n"
         f"Official docs: {cfg.docs_base_url}\n"
         f"Official releases: {cfg.github_releases_url}\n"
+        f"Official source repo: {cfg.github_repo_url}\n"
     )

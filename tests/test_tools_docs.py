@@ -18,6 +18,12 @@ def test_query_bazzite_docs_returns_official_source_pointers() -> None:
     assert "https://docs.bazzite.gg" in result
 
 
+def test_query_bazzite_docs_returns_repo_source_pointers() -> None:
+    result = asyncio.run(_query_bazzite_docs("github source repo"))
+    assert "Repo Sources" in result
+    assert "https://github.com/ublue-os/bazzite" in result
+
+
 def test_docs_dispatcher_search_requires_query() -> None:
     with pytest.raises(ToolError, match="query"):
         asyncio.run(docs(action="search"))
