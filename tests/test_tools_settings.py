@@ -3,7 +3,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bazzite_mcp.runner import ToolError
-from bazzite_mcp.tools.settings import _get_settings, _set_theme, quick_setting, gsettings
+from bazzite_mcp.tools.settings import quick_setting, gsettings
+from bazzite_mcp.tools.settings.quick import _set_theme
+from bazzite_mcp.tools.settings.schema import _get_settings
 
 
 @patch("bazzite_mcp.tools.settings.quick.run_audited")

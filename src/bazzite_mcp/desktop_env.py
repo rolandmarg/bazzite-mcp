@@ -108,7 +108,11 @@ def _iter_candidate_processes() -> list[tuple[str, int]]:
 
 @lru_cache(maxsize=1)
 def get_graphical_env() -> dict[str, str]:
-    """Return the best-known graphical session environment."""
+    """Return the best-known graphical session environment.
+
+    Returns env vars to overlay onto subprocesses. Does not mutate
+    os.environ so the server stays responsive to session changes on restart.
+    """
     load_config()
 
     current = _current_graphical_env()
@@ -124,9 +128,6 @@ def get_graphical_env() -> dict[str, str]:
         if score > best_score:
             best = candidate
             best_score = score
-
-    if best:
-        os.environ.update(best)
 
     return best
 

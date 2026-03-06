@@ -3,7 +3,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bazzite_mcp.runner import ToolError
-from bazzite_mcp.tools.system import _hardware_info, _system_info_basic, system_info, manage_snapshots
+from bazzite_mcp.tools.system import system_info, manage_snapshots
+from bazzite_mcp.tools.system.info import _hardware_info, _system_info_basic
 
 
 @patch("bazzite_mcp.tools.system.info.run_command")

@@ -70,7 +70,6 @@ ALLOWED_COMMAND_PREFIXES = frozenset(
         "virsh",
         "virt-install",
         "waydroid",
-        "xrandr",
         "ydotool",
     }
 )

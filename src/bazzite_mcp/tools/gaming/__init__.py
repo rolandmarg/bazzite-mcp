@@ -9,10 +9,6 @@ from .reports import _game_reports
 from .settings import _game_settings_get, _game_settings_set
 
 __all__ = [
-    "_game_reports",
-    "_game_settings_get",
-    "_game_settings_set",
-    "_steam_library",
     "gaming",
 ]
 

@@ -5,6 +5,8 @@ from typing import Literal
 
 from bazzite_mcp.runner import ToolError, run_audited, run_command
 
+_BLOCKED_FLAGS = ("--privileged", "--pid=host", "--net=host", "-v /:/")
+
 
 def manage_podman(
     action: Literal[
@@ -15,43 +17,43 @@ def manage_podman(
     command: str = "",
 ) -> str:
     """Run podman container operations with dangerous flag blocking."""
-    blocked_flags = ("--privileged", "--pid=host", "--net=host", "-v /:/")
-    parts: list[str] = ["podman", action]
+    argv: list[str] = ["podman", action]
 
-    if action in ("run", "pull") and image:
-        for flag in blocked_flags:
+    if action in ("run", "pull"):
+        if not image:
+            raise ToolError("Error: 'image' is required for podman run.")
+        for flag in _BLOCKED_FLAGS:
             if flag in image:
                 raise ToolError(f"Blocked: '{flag}' is not allowed for safety.")
-        parts.append(shlex.quote(image))
-    elif action in ("stop", "rm", "logs", "inspect") and container:
-        parts.append(shlex.quote(container))
-    elif action == "exec" and container and command:
-        parts.append(shlex.quote(container))
+        argv.append(image)
+    elif action in ("stop", "rm", "logs", "inspect"):
+        if not container:
+            raise ToolError(f"Error: 'container' is required for podman {action}.")
+        argv.append(container)
+    elif action == "exec":
+        if not container:
+            raise ToolError("Error: 'container' is required for podman exec.")
+        if not command:
+            raise ToolError("Error: 'command' is required for podman exec.")
+        argv.append(container)
         try:
             exec_parts = shlex.split(command)
         except ValueError:
             raise ToolError("Invalid podman exec command syntax.")
         if not exec_parts:
             raise ToolError("Error: 'command' is required for podman exec.")
-        parts.extend(shlex.quote(part) for part in exec_parts)
+        argv.extend(exec_parts)
     elif action in ("ps", "images"):
         pass
-    elif action == "run" and not image:
-        raise ToolError("Error: 'image' is required for podman run.")
-    elif action == "exec" and not command:
-        raise ToolError("Error: 'command' is required for podman exec.")
-    elif action == "exec" and not container:
-        raise ToolError("Error: 'container' is required for podman exec.")
 
-    cmd = " ".join(parts)
     if action in ("run", "stop", "rm", "pull"):
         result = run_audited(
-            cmd,
+            argv,
             tool="manage_podman",
             args={"action": action, "container": container, "image": image},
         )
     else:
-        result = run_command(cmd)
+        result = run_command(argv)
     if result.returncode != 0:
         raise ToolError(f"Error: {result.stderr}")
     return result.stdout

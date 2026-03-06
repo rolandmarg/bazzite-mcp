@@ -74,7 +74,7 @@ def _list_distroboxes() -> str:
 
 def _exec_in_distrobox(name: str, command: str) -> str:
     """Run a command inside a specific distrobox container."""
-    check_command(command)
+    check = check_command(command)
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -85,6 +85,8 @@ def _exec_in_distrobox(name: str, command: str) -> str:
         args={"name": name, "command": command},
     )
     output = result.stdout
+    if check.warning and not (result.warning and check.warning in result.warning):
+        output = f"WARNING: {check.warning}\n\n{output}"
     if result.stderr:
         output += f"\nSTDERR: {result.stderr}"
     return output

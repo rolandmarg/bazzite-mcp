@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from mcp.server.fastmcp import Context
@@ -9,40 +10,26 @@ from mcp.server.fastmcp import Context
 from bazzite_mcp.config import load_config
 from bazzite_mcp.runner import ToolError
 
-_REFERENCE_CONTENT = {
-    "install-policy": """
-- Prefer `ujust` for Bazzite-native setup and maintenance flows.
-- Prefer Flatpak for GUI apps.
-- Prefer Homebrew for CLI and TUI tools.
-- Prefer Distrobox for development stacks and foreign package ecosystems.
-- Treat `rpm-ostree` as a last resort on the host.
-- Prefer VMs for untrusted binaries or stronger isolation.
-""".strip(),
-    "tool-routing": """
-- Use MCP for live state, guarded host changes, screenshots, services, packages, containers, VMs, and gaming settings.
-- Use local knowledge resources for install policy, troubleshooting, and execution-model guidance.
-- Use official docs and source repo pointers for deeper platform reference when the built-in knowledge resources are insufficient.
-""".strip(),
-    "troubleshooting": """
-1. Gather `system_info(detail="basic")`.
-2. Use `system_info(detail="full")` when hardware details matter.
-3. Run `system_doctor()` for broad checks.
-4. Inspect service state with `manage_service(action="status", ...)`.
-5. Search built-in knowledge with `docs(action="search", query=...)`.
-6. Follow official docs and source repo pointers when deeper Bazzite reference is needed.
-""".strip(),
-    "dev-environments": """
-- Keep the immutable host lean.
-- Use Distrobox for most development environments.
-- Use the host only for native Bazzite tools and tightly integrated desktop needs.
-- Use a VM when you need stronger isolation than a container provides.
-""".strip(),
-    "game-optimization": """
-- Start with Steam, Proton, and MangoHud defaults.
-- Use community reports for game-specific compatibility hints.
-- Prefer minimally invasive tweaks before layering new host packages.
-""".strip(),
+_REFERENCES_DIR = Path(__file__).resolve().parents[4] / "skills" / "bazzite-operator" / "references"
+
+_SLUG_TO_FILE = {
+    "install-policy": "install-policy.md",
+    "tool-routing": "tool-routing.md",
+    "troubleshooting": "troubleshooting.md",
+    "dev-environments": "dev-environments.md",
+    "game-optimization": "game-optimization.md",
 }
+
+
+def _load_reference(slug: str) -> str:
+    """Load reference content from the skill reference files (single source of truth)."""
+    filename = _SLUG_TO_FILE.get(slug)
+    if not filename:
+        return ""
+    path = _REFERENCES_DIR / filename
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
 
 
 @dataclass(frozen=True)
@@ -61,35 +48,35 @@ def _knowledge_documents() -> list[KnowledgeDocument]:
         KnowledgeDocument(
             title="Install Policy",
             summary="Choose the least invasive Bazzite-native install path before layering packages.",
-            body=_REFERENCE_CONTENT["install-policy"],
+            body=_load_reference("install-policy"),
             tags=("install", "packages", "flatpak", "brew", "distrobox", "rpm-ostree"),
             resource_uri="bazzite://knowledge/install-policy",
         ),
         KnowledgeDocument(
             title="Tool Routing",
             summary="Map tasks to MCP tools versus skill reasoning.",
-            body=_REFERENCE_CONTENT["tool-routing"],
+            body=_load_reference("tool-routing"),
             tags=("routing", "tools", "workflow", "mcp"),
             resource_uri="bazzite://knowledge/tool-routing",
         ),
         KnowledgeDocument(
             title="Troubleshooting",
             summary="Structured Bazzite troubleshooting flow for system and service issues.",
-            body=_REFERENCE_CONTENT["troubleshooting"],
+            body=_load_reference("troubleshooting"),
             tags=("troubleshooting", "diagnostics", "services", "desktop"),
             resource_uri="bazzite://knowledge/troubleshooting",
         ),
         KnowledgeDocument(
             title="Dev Environments",
             summary="Guidance for choosing host, Distrobox, or VM for development workloads.",
-            body=_REFERENCE_CONTENT["dev-environments"],
+            body=_load_reference("dev-environments"),
             tags=("development", "distrobox", "vm", "containers"),
             resource_uri="bazzite://knowledge/dev-environments",
         ),
         KnowledgeDocument(
             title="Game Optimization",
             summary="Bazzite gaming guidance for Steam, Proton, and performance tuning.",
-            body=_REFERENCE_CONTENT["game-optimization"],
+            body=_load_reference("game-optimization"),
             tags=("gaming", "steam", "proton", "performance"),
             resource_uri="bazzite://knowledge/game-optimization",
         ),
@@ -183,18 +170,12 @@ def knowledge_index_markdown() -> str:
 
 
 def knowledge_resource_markdown(slug: str) -> str:
-    mapping = {
-        "install-policy": "Install Policy",
-        "tool-routing": "Tool Routing",
-        "troubleshooting": "Troubleshooting",
-        "dev-environments": "Dev Environments",
-        "game-optimization": "Game Optimization",
-        "repo-sources": "Repo Sources",
-    }
-    title = mapping[slug]
     if slug == "repo-sources":
-        return f"# {title}\n\n{_repo_sources_body(load_config())}"
-    return f"# {title}\n\n{_REFERENCE_CONTENT[slug]}"
+        return f"# Repo Sources\n\n{_repo_sources_body(load_config())}"
+    content = _load_reference(slug)
+    if content:
+        return content
+    return f"No knowledge resource found for '{slug}'."
 
 
 async def _query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
@@ -252,30 +233,18 @@ async def _bazzite_changelog(version: str | None = None, count: int = 5) -> str:
     )
 
 
-async def refresh_docs_cache(ctx: Context | None = None) -> str:
-    """Compatibility no-op after removing the local docs crawler/cache."""
-    if ctx:
-        await ctx.report_progress(1, 1)
-    return (
-        "No-op: local docs crawling and cache refresh were removed. "
-        "Use the built-in knowledge resources at bazzite://knowledge/* plus the official Bazzite docs and repo URLs instead."
-    )
-
-
 async def docs(
-    action: Literal["search", "changelog", "refresh"],
+    action: Literal["search", "changelog"],
     query: str | None = None,
     version: str | None = None,
     count: int = 5,
     ctx: Context | None = None,
 ) -> str:
-    """Search local Bazzite knowledge, return official changelog sources, or report docs mode."""
+    """Search local Bazzite knowledge or return official changelog sources."""
     if action == "search":
         if not query:
             raise ToolError("'query' is required for action='search'.")
         return await _query_bazzite_docs(query, ctx)
     if action == "changelog":
         return await _bazzite_changelog(version, count)
-    if action == "refresh":
-        return await refresh_docs_cache(ctx)
     raise ToolError(f"Unknown action '{action}'.")

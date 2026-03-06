@@ -4,12 +4,12 @@ import pytest
 
 from bazzite_mcp.runner import CommandResult, ToolError
 from bazzite_mcp.tools.services import (
-    _network_status,
-    _service_status,
     manage_firewall,
     manage_network,
     manage_service,
 )
+from bazzite_mcp.tools.services.network import _network_status
+from bazzite_mcp.tools.services.systemd import _service_status
 
 
 @patch("bazzite_mcp.tools.services.systemd.run_command")

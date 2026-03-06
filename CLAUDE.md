@@ -4,7 +4,7 @@
 - Test: `uv run pytest tests/ -v`
 - Build: `uv build`
 - Install (dev): `uv tool install -e .`
-- Refresh docs cache: `uv run bazzite-mcp-refresh`
+- Cleanup local data: `bazzite-mcp-cleanup`
 
 ## Workflow
 - After completing work, always commit and push to the remote.

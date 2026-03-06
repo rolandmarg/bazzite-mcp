@@ -11,6 +11,14 @@ from bazzite_mcp.runner import run_command
 from .accessibility import _atspi_call
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    """Convert a value to int, handling floats from KWin on scaled displays."""
+    try:
+        return int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _kwin_get_windows() -> list[dict]:
     """List windows via KWin WindowsRunner DBus interface."""
     result = run_command(
@@ -48,10 +56,10 @@ def _kwin_get_windows() -> list[dict]:
                 "id": uuid,
                 "title": title,
                 "class": wclass or info.get("resourceClass", ""),
-                "x": info.get("x"),
-                "y": info.get("y"),
-                "width": info.get("width"),
-                "height": info.get("height"),
+                "x": _safe_int(info.get("x", 0)),
+                "y": _safe_int(info.get("y", 0)),
+                "width": _safe_int(info.get("width", 0)),
+                "height": _safe_int(info.get("height", 0)),
                 "minimized": info.get("minimized", False),
                 "fullscreen": info.get("fullscreen", False),
                 "desktop_file": info.get("desktopFile", ""),
@@ -71,10 +79,14 @@ def _parse_window_info(raw: str) -> dict:
                 info[key] = True
             elif value == "false":
                 info[key] = False
-            elif value.lstrip("-").isdigit():
-                info[key] = int(value)
             else:
-                info[key] = value
+                try:
+                    info[key] = int(value)
+                except ValueError:
+                    try:
+                        info[key] = float(value)
+                    except ValueError:
+                        info[key] = value
     return info
 
 

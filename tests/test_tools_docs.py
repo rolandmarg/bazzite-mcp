@@ -35,10 +35,9 @@ def test_docs_dispatcher_changelog_returns_official_release_source() -> None:
     assert "github.com/ublue-os/bazzite/releases" in result
 
 
-def test_docs_dispatcher_refresh_is_no_op() -> None:
-    result = asyncio.run(docs(action="refresh"))
-    assert "No-op" in result
-    assert "knowledge resources" in result
+def test_docs_dispatcher_rejects_unknown_action() -> None:
+    with pytest.raises(ToolError, match="Unknown action"):
+        asyncio.run(docs(action="refresh"))  # type: ignore[arg-type]
 
 
 def test_docs_dispatcher_rejects_removed_policy_action() -> None:

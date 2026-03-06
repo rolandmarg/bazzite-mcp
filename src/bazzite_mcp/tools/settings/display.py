@@ -23,11 +23,7 @@ def _get_display_config() -> str:
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout
 
-    fallback = run_command("xrandr --query")
-    if fallback.returncode == 0 and fallback.stdout.strip():
-        return fallback.stdout
-
-    return "No display tool available"
+    return "No display tool available (kscreen-doctor for KDE, gnome-randr for GNOME)"
 
 
 def _set_display_config_kde(
@@ -130,23 +126,7 @@ def _set_display_config(
             args={"output": output, "resolution": resolution, "refresh": refresh},
         )
         if result.returncode != 0:
-            fallback = f"xrandr --output {quoted_output}"
-            if resolution:
-                fallback += f" --mode {shlex.quote(resolution)}"
-            if refresh:
-                fallback += f" --rate {shlex.quote(refresh)}"
-            result = run_audited(
-                fallback,
-                tool="display_config",
-                args={
-                    "output": output,
-                    "resolution": resolution,
-                    "refresh": refresh,
-                    "via": "xrandr",
-                },
-            )
-            if result.returncode != 0:
-                raise ToolError(f"Failed to set display config: {result.stderr}")
+            raise ToolError(f"Failed to set display config: {result.stderr}")
 
     return (
         f"Display '{output}' configured: "

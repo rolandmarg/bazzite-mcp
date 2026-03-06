@@ -13,7 +13,7 @@ from bazzite_mcp.desktop_env import format_graphical_error
 from bazzite_mcp.screen_geometry import get_monitor_info
 from bazzite_mcp.runner import run_command
 from .shared import SCREENSHOT_DIR
-from .windows import _kwin_activate, _kwin_get_window_info, _kwin_query_window_info, _resolve_window
+from .windows import _kwin_activate, _kwin_get_window_info, _kwin_query_window_info, _resolve_window, _safe_int
 
 
 def _read_png_dimensions(path: Path) -> tuple[int, int]:
@@ -41,8 +41,8 @@ def _build_metadata(path: Path, status: str, target: str) -> str:
     if target == "window":
         window_info = _kwin_query_window_info()
         if window_info:
-            metadata["origin_x"] = int(window_info.get("x", 0))
-            metadata["origin_y"] = int(window_info.get("y", 0))
+            metadata["origin_x"] = _safe_int(window_info.get("x", 0))
+            metadata["origin_y"] = _safe_int(window_info.get("y", 0))
             metadata["scale"] = _monitor_scale_for_point(
                 metadata["origin_x"],
                 metadata["origin_y"],
@@ -62,10 +62,10 @@ def _monitor_scale_for_point(x: int, y: int) -> float:
 
 
 def screenshot(
-    target: Literal["desktop", "window"] = "window",
+    target: Literal["desktop", "window"] = "desktop",
     window: str | None = None,
 ):
-    """Capture the desktop or active window as an image file."""
+    """Capture a screenshot. Default captures the full desktop (all monitors). Use target='window' to capture just the active or a specific window."""
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = int(time.time() * 1000)
     png_path = SCREENSHOT_DIR / f"screenshot-{target}-{timestamp}.png"
@@ -96,8 +96,8 @@ def screenshot(
 
 def _build_window_metadata(path: Path, status: str, window_info: dict) -> str:
     width, height = _read_png_dimensions(path)
-    origin_x = int(window_info.get("x", 0))
-    origin_y = int(window_info.get("y", 0))
+    origin_x = _safe_int(window_info.get("x", 0))
+    origin_y = _safe_int(window_info.get("y", 0))
     return json.dumps(
         {
             "status": status,

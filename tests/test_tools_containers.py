@@ -4,12 +4,11 @@ import pytest
 
 from bazzite_mcp.runner import ToolError
 from bazzite_mcp.tools.containers import (
-    _create_distrobox,
-    _list_distroboxes,
     manage_distrobox,
     manage_podman,
     manage_quadlet,
 )
+from bazzite_mcp.tools.containers.distrobox import _create_distrobox, _list_distroboxes
 
 
 @patch("bazzite_mcp.tools.containers.distrobox.run_command")
@@ -35,7 +34,8 @@ def test_manage_podman_exec_uses_command(mock_run: MagicMock) -> None:
     mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
     result = manage_podman("exec", container="box1", command="ls /")
     assert result == "ok"
-    assert "podman exec" in mock_run.call_args[0][0]
+    argv = mock_run.call_args[0][0]
+    assert argv[:3] == ["podman", "exec", "box1"]
 
 
 @patch("bazzite_mcp.tools.containers.quadlet.Path.home")
