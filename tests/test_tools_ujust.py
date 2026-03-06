@@ -49,8 +49,8 @@ def test_ujust_list_falls_back_to_full_list(mock_run: MagicMock) -> None:
 
     assert "update" in result
     assert mock_run.call_count == 2
-    assert mock_run.call_args_list[0].args[0] == "ujust --summary"
-    assert mock_run.call_args_list[1].args[0] == "ujust"
+    assert mock_run.call_args_list[0].args[0] == ["ujust", "--summary"]
+    assert mock_run.call_args_list[1].args[0] == ["ujust"]
 
 
 @patch("bazzite_mcp.tools.core.ujust.run_command")
@@ -60,7 +60,7 @@ def test_ujust_run_help_uses_usage(mock_run: MagicMock) -> None:
     result = _ujust_run("setup-virtualization help")
 
     assert result == "usage output"
-    mock_run.assert_called_once_with("ujust --usage setup-virtualization")
+    mock_run.assert_called_once_with(["ujust", "--usage", "setup-virtualization"])
 
 
 @patch("bazzite_mcp.tools.core.ujust.run_command")
