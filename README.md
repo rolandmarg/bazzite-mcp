@@ -7,7 +7,7 @@ Use it when the agent needs:
 - Bazzite-native knowledge and install choices
 - Live host state and guarded mutations
 - Desktop awareness: screenshots, windows, input, accessibility
-- Bazzite docs and changelog lookup
+- Built-in Bazzite knowledge resources and official doc pointers
 
 `src/bazzite_mcp/` is the capability layer.
 `skills/bazzite-operator/` is the workflow/policy layer.
@@ -62,12 +62,14 @@ The server exposes host capabilities for:
 - containers and VMs
 - desktop control: screenshots, windows, AT-SPI actions, keyboard, mouse
 - gaming: Steam library, reports, MangoHud settings
-- docs search and changelog retrieval
+- lightweight docs/knowledge lookup and official source pointers
 
 Resources:
 
 - `bazzite://system/overview`
-- `bazzite://docs/index`
+- `bazzite://knowledge/index`
+- `bazzite://knowledge/install-policy`
+- `bazzite://knowledge/troubleshooting`
 - `bazzite://server/info`
 
 ## Skills
@@ -83,12 +85,6 @@ Use the skill for:
 Use MCP tools for live state and host changes. Use the skill for policy and workflow.
 
 ## Utilities
-
-Refresh docs cache:
-
-```bash
-bazzite-mcp-refresh
-```
 
 Clean local data:
 

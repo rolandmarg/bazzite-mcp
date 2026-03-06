@@ -7,7 +7,7 @@ description: Operate and troubleshoot Bazzite OS systems with Bazzite-specific p
 
 ## Overview
 
-Use this skill as the workflow and policy layer for Bazzite tasks. Treat `bazzite-mcp` as the capability layer for live system state, guarded mutations, documentation search, screenshots, and audit-aware changes.
+Use this skill as the workflow and policy layer for Bazzite tasks. Treat `bazzite-mcp` as the capability layer for live system state, guarded mutations, built-in knowledge resources, screenshots, and audit-aware changes.
 
 Prefer MCP tools over ad hoc shell commands when an equivalent MCP tool exists. Use shell access mainly for targeted logs or for capabilities the MCP server does not expose yet.
 
@@ -17,7 +17,7 @@ Route tasks this way:
 
 - Use `ujust` for Bazzite-provided setup and maintenance flows.
 - Use `packages` for package discovery, installation, removal, and inventory across install methods.
-- Use `docs` for Bazzite documentation search, changelogs, and policy lookup.
+- Use `docs` for lightweight Bazzite knowledge lookup and official source pointers.
 - Use `system_info`, `system_doctor`, and `storage_diagnostics` to inspect the host before recommending changes.
 - Use `manage_service`, `manage_network`, and `manage_firewall` for service and network operations.
 - Use `manage_distrobox`, `manage_quadlet`, and `manage_podman` for development environments and containerized services.

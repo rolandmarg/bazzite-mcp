@@ -1,295 +1,241 @@
-import asyncio
-import logging
-from typing import Literal
-from urllib.parse import urljoin, urlparse
+from __future__ import annotations
 
-import httpx
-from bs4 import BeautifulSoup, Tag
+import re
+from dataclasses import dataclass
+from typing import Literal
+
 from mcp.server.fastmcp import Context
 
-from bazzite_mcp.cache.docs_cache import DocsCache
 from bazzite_mcp.config import load_config
 from bazzite_mcp.runner import ToolError
 
+_REFERENCE_CONTENT = {
+    "install-policy": """
+- Prefer `ujust` for Bazzite-native setup and maintenance flows.
+- Prefer Flatpak for GUI apps.
+- Prefer Homebrew for CLI and TUI tools.
+- Prefer Distrobox for development stacks and foreign package ecosystems.
+- Treat `rpm-ostree` as a last resort on the host.
+- Prefer VMs for untrusted binaries or stronger isolation.
+""".strip(),
+    "tool-routing": """
+- Use MCP for live state, guarded host changes, screenshots, services, packages, containers, VMs, and gaming settings.
+- Use local knowledge resources for install policy, troubleshooting, and execution-model guidance.
+- Use official docs for deeper platform reference when the built-in knowledge resources are insufficient.
+""".strip(),
+    "troubleshooting": """
+1. Gather `system_info(detail="basic")`.
+2. Use `system_info(detail="full")` when hardware details matter.
+3. Run `system_doctor()` for broad checks.
+4. Inspect service state with `manage_service(action="status", ...)`.
+5. Search built-in knowledge with `docs(action="search", query=...)`.
+6. Follow official source pointers when deeper Bazzite reference is needed.
+""".strip(),
+    "dev-environments": """
+- Keep the immutable host lean.
+- Use Distrobox for most development environments.
+- Use the host only for native Bazzite tools and tightly integrated desktop needs.
+- Use a VM when you need stronger isolation than a container provides.
+""".strip(),
+    "game-optimization": """
+- Start with Steam, Proton, and MangoHud defaults.
+- Use community reports for game-specific compatibility hints.
+- Prefer minimally invasive tweaks before layering new host packages.
+""".strip(),
+}
 
-logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True)
+class KnowledgeDocument:
+    title: str
+    summary: str
+    body: str
+    tags: tuple[str, ...]
+    resource_uri: str | None = None
+    source_url: str | None = None
 
 
-def _extract_content(soup: BeautifulSoup) -> str | None:
-    """Extract main content with multiple fallback selectors."""
-    selectors = [
-        ("article", {}),
-        (None, {"class_": "md-content"}),
-        (None, {"class_": "md-content__inner"}),
-        ("main", {}),
-        (None, {"role": "main"}),
-        (None, {"id": "content"}),
-    ]
-    for tag, attrs in selectors:
-        el = soup.find(tag, **attrs) if tag else soup.find(**attrs)
-        if el and isinstance(el, Tag):
-            text = el.get_text(separator="\n", strip=True)
-            if len(text) > 50:
-                return text
-
-    body = soup.find("body")
-    if body and isinstance(body, Tag):
-        for unwanted in body.find_all(["nav", "header", "footer", "script", "style"]):
-            unwanted.decompose()
-        text = body.get_text(separator="\n", strip=True)
-        if len(text) > 50:
-            return text
-
-    return None
-
-
-def _discover_doc_links(soup: BeautifulSoup, base_url: str) -> set[str]:
-    """Find all internal doc links on a page."""
+def _knowledge_documents() -> list[KnowledgeDocument]:
     cfg = load_config()
-    parsed_base = urlparse(cfg.docs_base_url)
-    links: set[str] = set()
-    for a_tag in soup.find_all("a", href=True):
-        href = a_tag.get("href")
-        if not isinstance(href, str):
-            continue
-        full_url = urljoin(base_url, href)
-        parsed = urlparse(full_url)
-        if (
-            parsed.netloc == parsed_base.netloc
-            and not parsed.fragment
-            and not parsed.path.startswith("/cdn-cgi/")
-        ):
-            clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-            if not clean.endswith("/") and "." not in parsed.path.split("/")[-1]:
-                clean += "/"
-            links.add(clean)
-    return links
+    return [
+        KnowledgeDocument(
+            title="Install Policy",
+            summary="Choose the least invasive Bazzite-native install path before layering packages.",
+            body=_REFERENCE_CONTENT["install-policy"],
+            tags=("install", "packages", "flatpak", "brew", "distrobox", "rpm-ostree"),
+            resource_uri="bazzite://knowledge/install-policy",
+        ),
+        KnowledgeDocument(
+            title="Tool Routing",
+            summary="Map tasks to MCP tools versus skill reasoning.",
+            body=_REFERENCE_CONTENT["tool-routing"],
+            tags=("routing", "tools", "workflow", "mcp"),
+            resource_uri="bazzite://knowledge/tool-routing",
+        ),
+        KnowledgeDocument(
+            title="Troubleshooting",
+            summary="Structured Bazzite troubleshooting flow for system and service issues.",
+            body=_REFERENCE_CONTENT["troubleshooting"],
+            tags=("troubleshooting", "diagnostics", "services", "desktop"),
+            resource_uri="bazzite://knowledge/troubleshooting",
+        ),
+        KnowledgeDocument(
+            title="Dev Environments",
+            summary="Guidance for choosing host, Distrobox, or VM for development workloads.",
+            body=_REFERENCE_CONTENT["dev-environments"],
+            tags=("development", "distrobox", "vm", "containers"),
+            resource_uri="bazzite://knowledge/dev-environments",
+        ),
+        KnowledgeDocument(
+            title="Game Optimization",
+            summary="Bazzite gaming guidance for Steam, Proton, and performance tuning.",
+            body=_REFERENCE_CONTENT["game-optimization"],
+            tags=("gaming", "steam", "proton", "performance"),
+            resource_uri="bazzite://knowledge/game-optimization",
+        ),
+        KnowledgeDocument(
+            title="Official Docs",
+            summary="Canonical Bazzite documentation home.",
+            body=(
+                f"Official Bazzite documentation lives at {cfg.docs_base_url}.\n"
+                "Use it for installation, updates, hardware guidance, and general platform docs."
+            ),
+            tags=("official", "docs", "reference"),
+            source_url=cfg.docs_base_url,
+        ),
+        KnowledgeDocument(
+            title="Releases",
+            summary="Official Bazzite release history and changelog source.",
+            body=(
+                f"Official Bazzite release notes live at {cfg.github_releases_url}.\n"
+                "Use release pages to inspect what changed between versions."
+            ),
+            tags=("releases", "changelog", "updates"),
+            source_url=cfg.github_releases_url,
+        ),
+    ]
 
 
-async def _ensure_fresh_docs_cache(
-    cache: DocsCache, ctx: Context | None = None
-) -> tuple[DocsCache, str]:
-    """Refresh docs on demand when cache is empty or stale."""
-    reason = ""
-    if cache.page_count() == 0:
-        reason = "empty"
-    elif cache.is_stale():
-        reason = "stale"
+def _terms(query: str) -> list[str]:
+    return [term.lower() for term in re.findall(r"\w+", query)]
 
-    if not reason:
-        return cache, ""
 
-    logger.info("Docs cache %s; triggering auto-refresh", reason)
-    report = await _refresh_docs_cache(ctx)
-    refreshed_cache = DocsCache()
-    if refreshed_cache.page_count() == 0:
-        return refreshed_cache, (
-            "\n\nNote: auto-refresh ran but docs cache is still empty. "
-            f"Refresh report: {report.splitlines()[0]}"
-        )
+def _score_document(doc: KnowledgeDocument, terms: list[str]) -> int:
+    haystack = " ".join(
+        [
+            doc.title,
+            doc.summary,
+            doc.body,
+            " ".join(doc.tags),
+            doc.resource_uri or "",
+            doc.source_url or "",
+        ]
+    ).lower()
+    return sum(haystack.count(term) for term in terms)
 
-    return refreshed_cache, (
-        f"\n\nNote: auto-refreshed docs cache ({reason} cache). "
-        f"{report.splitlines()[0]}"
-    )
+
+def _snippet(doc: KnowledgeDocument, terms: list[str], max_chars: int = 240) -> str:
+    lines = [line.strip() for line in doc.body.splitlines() if line.strip()]
+    for line in lines:
+        lowered = line.lower()
+        if any(term in lowered for term in terms):
+            return line[:max_chars]
+    if lines:
+        return lines[0][:max_chars]
+    return doc.summary[:max_chars]
+
+
+def knowledge_index_markdown() -> str:
+    docs = _knowledge_documents()
+    parts = ["# Bazzite Knowledge\n"]
+
+    parts.append("## Local Resources")
+    for doc in docs:
+        if doc.resource_uri:
+            parts.append(f"- `{doc.resource_uri}` — {doc.summary}")
+
+    parts.append("\n## Official Sources")
+    for doc in docs:
+        if doc.source_url:
+            parts.append(f"- {doc.title}: {doc.source_url}")
+
+    return "\n".join(parts)
+
+
+def knowledge_resource_markdown(slug: str) -> str:
+    mapping = {
+        "install-policy": "Install Policy",
+        "tool-routing": "Tool Routing",
+        "troubleshooting": "Troubleshooting",
+        "dev-environments": "Dev Environments",
+        "game-optimization": "Game Optimization",
+    }
+    title = mapping[slug]
+    return f"# {title}\n\n{_REFERENCE_CONTENT[slug]}"
 
 
 async def _query_bazzite_docs(query: str, ctx: Context | None = None) -> str:
-    """Search cached Bazzite documentation using full-text search."""
-    cache = DocsCache()
-    cache, refresh_note = await _ensure_fresh_docs_cache(cache, ctx)
+    """Search local Bazzite knowledge and return official source pointers."""
+    terms = _terms(query)
+    if not terms:
+        return "No searchable terms in query."
 
-    if cache.page_count() == 0:
-        return (
-            "Docs cache is empty. Auto-refresh was attempted but no pages were cached."
-            + refresh_note
-        )
+    scored = [
+        (doc, _score_document(doc, terms))
+        for doc in _knowledge_documents()
+    ]
+    results = [(doc, score) for doc, score in scored if score > 0]
+    results.sort(key=lambda item: item[1], reverse=True)
 
-    results = cache.search(query, limit=10)
+    if ctx:
+        await ctx.report_progress(len(results), len(scored))
 
     if not results:
-        return f"No results for '{query}' in cached docs." + refresh_note
+        return (
+            f"No local knowledge results for '{query}'.\n\n"
+            f"Official docs: {load_config().docs_base_url}\n"
+            "Use the local knowledge resources for install policy and troubleshooting guidance."
+        )
 
-    parts: list[str] = []
-    for result in results:
-        snippet = result["content"][:500]
+    parts = [f"# Bazzite Knowledge Results for '{query}'\n"]
+    for doc, score in results[:5]:
+        location = doc.resource_uri or doc.source_url or "local"
         parts.append(
-            f"### {result['title']} ({result['section']})\n{snippet}\nSource: {result['url']}"
+            f"## {doc.title}\n"
+            f"{doc.summary}\n\n"
+            f"Snippet: {_snippet(doc, terms)}\n"
+            f"Location: {location}\n"
+            f"Score: {score}"
         )
-    return "\n\n---\n\n".join(parts) + refresh_note
-
-
-async def _bazzite_changelog(version: str | None = None, count: int = 5) -> str:
-    """Get Bazzite release changelog from cache or GitHub API."""
-    cfg = load_config()
-    cache = DocsCache()
-    entries = cache.get_changelog(version=version, limit=count)
-    if entries:
-        return "\n\n".join(
-            f"## {entry['version']} ({entry['date']})\n{entry['body'][:1000]}"
-            for entry in entries
-        )
-
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(
-                cfg.github_releases_url, params={"per_page": count}
-            )
-            response.raise_for_status()
-            releases = response.json()
-    except Exception as exc:
-        raise ToolError(f"Failed to fetch changelogs: {exc}") from exc
-
-    parts: list[str] = []
-    for release in releases:
-        tag = release.get("tag_name", "unknown")
-        published = release.get("published_at", "unknown")
-        body = release.get("body", "")
-        cache.store_changelog(tag, published, body)
-        parts.append(f"## {tag} ({published})\n{body[:1000] if body else 'No body'}")
     return "\n\n".join(parts)
 
 
-async def _refresh_docs_cache(ctx: Context | None = None) -> str:
-    """Crawl docs.bazzite.gg recursively and refresh the local cache."""
+async def _bazzite_changelog(version: str | None = None, count: int = 5) -> str:
+    """Return official Bazzite release sources instead of mirroring changelogs locally."""
     cfg = load_config()
-    cache = DocsCache()
-    logger.info("Starting docs cache refresh (max_pages=%s)", cfg.crawl_max_pages)
-
-    fetched = 0
-    errors: list[str] = []
-    staged_pages: list[dict[str, str]] = []
-    visited: set[str] = set()
-    to_visit: set[str] = {cfg.docs_base_url + "/"}
-    max_pages = cfg.crawl_max_pages
-    concurrency = 5
-    sem = asyncio.Semaphore(concurrency)
-
-    async def fetch_one(client: httpx.AsyncClient, url: str) -> dict:
-        async with sem:
-            try:
-                response = await client.get(url)
-                response.raise_for_status()
-            except Exception as exc:
-                return {"url": url, "error": str(exc), "links": set(), "page": None}
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            links = _discover_doc_links(soup, url)
-
-            content = _extract_content(soup)
-            if not content:
-                return {
-                    "url": url,
-                    "error": "no extractable content",
-                    "links": links,
-                    "page": None,
-                }
-
-            title_tag = soup.find("title")
-            title = title_tag.get_text(strip=True) if title_tag else url
-
-            parsed = urlparse(url)
-            path_parts = [part for part in parsed.path.strip("/").split("/") if part]
-            section = "/".join(path_parts) if path_parts else "Home"
-
-            return {
-                "url": url,
-                "error": None,
-                "links": links,
-                "page": {
-                    "url": url,
-                    "title": title,
-                    "content": content,
-                    "section": section,
-                },
-            }
-
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        while to_visit and fetched < max_pages:
-            batch: list[str] = []
-            while to_visit and len(batch) < concurrency:
-                url = to_visit.pop()
-                if url in visited:
-                    continue
-                visited.add(url)
-                batch.append(url)
-
-            if not batch:
-                continue
-
-            results = await asyncio.gather(*(fetch_one(client, url) for url in batch))
-            for result in results:
-                links = result.get("links", set())
-                if isinstance(links, set):
-                    to_visit.update(links - visited)
-
-                page = result.get("page")
-                if isinstance(page, dict):
-                    staged_pages.append(
-                        {
-                            "url": str(page["url"]),
-                            "title": str(page["title"]),
-                            "content": str(page["content"]),
-                            "section": str(page["section"]),
-                        }
-                    )
-                    fetched += 1
-                    if ctx:
-                        await ctx.report_progress(fetched, max_pages)
-                    if fetched >= max_pages:
-                        break
-                else:
-                    errors.append(
-                        f"{result.get('url', 'unknown')}: {result.get('error', 'unknown error')}"
-                    )
-
-            if fetched >= max_pages:
-                break
-
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(
-                cfg.github_releases_url, params={"per_page": 10}
-            )
-            response.raise_for_status()
-            for release in response.json():
-                cache.store_changelog(
-                    release.get("tag_name", "unknown"),
-                    release.get("published_at", ""),
-                    release.get("body", ""),
-                )
-    except Exception as exc:
-        errors.append(f"GitHub releases: {exc}")
-        logger.warning("Failed to refresh changelogs: %s", exc)
-
-    if staged_pages:
-        cache.clear()
-        for page in staged_pages:
-            cache.store_page(
-                url=page["url"],
-                title=page["title"],
-                content=page["content"],
-                section=page["section"],
-            )
-    else:
-        errors.append("No docs pages were fetched; existing cache was preserved.")
-
-    report = f"Refreshed docs cache: {fetched} pages crawled (max {max_pages})."
-    if errors:
-        logger.warning("Docs cache refresh completed with %s errors", len(errors))
-        report += f"\n\nErrors ({len(errors)}):\n" + "\n".join(
-            f"  - {err}" for err in errors
+    releases_url = cfg.github_releases_url
+    if version:
+        tag = version.removeprefix("v")
+        return (
+            f"Official Bazzite release source for '{version}':\n"
+            f"{releases_url}/tag/v{tag}\n\n"
+            f"All releases: {releases_url}"
         )
-    logger.info(
-        "Docs cache refresh completed: fetched=%s visited=%s", fetched, len(visited)
+    return (
+        "Bazzite changelogs are no longer mirrored locally.\n\n"
+        f"Official releases: {releases_url}\n"
+        f"Requested latest count: {count}"
     )
-    report += f"\nSkipped {len(visited) - fetched} pages (no content or errors)."
-    return report
 
 
 async def refresh_docs_cache(ctx: Context | None = None) -> str:
-    """Public wrapper for docs cache refresh."""
-    return await _refresh_docs_cache(ctx)
+    """Compatibility no-op after removing the local docs crawler/cache."""
+    if ctx:
+        await ctx.report_progress(1, 1)
+    return (
+        "No-op: local docs crawling and cache refresh were removed. "
+        "Use the built-in knowledge resources at bazzite://knowledge/* and the official Bazzite docs URL instead."
+    )
 
 
 async def docs(
@@ -299,7 +245,7 @@ async def docs(
     count: int = 5,
     ctx: Context | None = None,
 ) -> str:
-    """Search docs, get changelogs, or refresh the docs cache."""
+    """Search local Bazzite knowledge, return official changelog sources, or report docs mode."""
     if action == "search":
         if not query:
             raise ToolError("'query' is required for action='search'.")
@@ -307,5 +253,5 @@ async def docs(
     if action == "changelog":
         return await _bazzite_changelog(version, count)
     if action == "refresh":
-        return await _refresh_docs_cache(ctx)
+        return await refresh_docs_cache(ctx)
     raise ToolError(f"Unknown action '{action}'.")

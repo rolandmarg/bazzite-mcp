@@ -21,18 +21,13 @@ MCP Client ──stdio──▶ FastMCP (server.py)
               │
               ▼
           audit.py ──▶ audit_log.db
-
-          tools/core/docs.py  ──▶ httpx ──▶ docs.bazzite.gg / GitHub API
-              │
-              ▼
-          docs_cache.db (FTS5 with synonym expansion)
 ```
 
 ## Boundary
 
 The repo is split into two layers:
 
-- `src/bazzite_mcp/` is the capability layer. It owns host access, tool registration, guardrails, audit logging, docs caching, and live state.
+- `src/bazzite_mcp/` is the capability layer. It owns host access, tool registration, guardrails, audit logging, built-in knowledge resources, and live state.
 - `skills/bazzite-operator/` is the workflow layer. It owns install-policy guidance, troubleshooting sequences, and task-to-tool routing heuristics.
 
 Keep runtime behavior in MCP. Keep reusable reasoning and platform policy in the skill. Static policy and workflow prompts are intentionally absent from MCP.
@@ -45,10 +40,10 @@ the isolation. Security is handled by the guardrails layer instead.
 
 ## Command pipeline
 
-Every shell command flows through the same path. No tool calls `subprocess` directly.
+Every host command flows through the same path. Most tools do not call `subprocess` directly.
 
-1. **Guardrails** — blocked pattern regex + command allowlist. Raises `GuardrailError` before execution.
-2. **subprocess.run** — `shell=True`, `stdin=DEVNULL`, `start_new_session=True`, `timeout=120`
+1. **Guardrails** — command allowlist + safety checks. Raises `GuardrailError` before execution.
+2. **subprocess.run** — `shell=False`, `stdin=DEVNULL`, `start_new_session=True`, `timeout=120`
 3. **Audit** — mutating commands logged to SQLite with rollback commands
 
 ## Layout
@@ -62,15 +57,12 @@ src/bazzite_mcp/
 ├── db.py                # SQLite helpers and schemas
 ├── config.py            # Defaults < config.toml < env vars
 ├── cleanup.py           # Data cleanup and uninstall utilities
-├── refresh.py           # Standalone docs refresh entrypoint
-├── cache/
-│   └── docs_cache.py    # FTS5 keyword search with synonym expansion
 └── tools/
     ├── core/
     │   ├── __init__.py  # public core tool exports and compatibility surface
     │   ├── ujust.py     # ujust (Tier 1)
     │   ├── packages.py  # flatpak/brew/rpm-ostree
-    │   ├── docs.py      # Docs search + crawler + changelog
+    │   ├── docs.py      # Local knowledge lookup + official source pointers
     │   └── audit.py     # Audit log query + rollback
     ├── settings/
     │   ├── __init__.py  # public desktop setting exports
@@ -125,29 +117,24 @@ skills/
 
 ## Console scripts
 
-The package publishes three console commands:
+The package publishes two console commands:
 
 - `bazzite-mcp` — starts the MCP server (`stdio` transport)
-- `bazzite-mcp-refresh` — refreshes docs cache
 - `bazzite-mcp-cleanup` — removes local cache/audit/config data
 
 ## Storage
 
-Two SQLite databases in `~/.local/share/bazzite-mcp/`:
+SQLite data in `~/.local/share/bazzite-mcp/`:
 
 - **audit_log.db** — every mutating command with timestamp, args, output, and rollback command
-- **docs_cache.db** — crawled pages (FTS5-indexed), changelogs, game report cache
+- **docs_cache.db** — retained for community gaming report cache
 
 ## Config
 
-```
-Dataclass defaults  <  ~/.config/bazzite-mcp/config.toml  <  env vars
-```
+`~/.config/bazzite-mcp/config.toml` plus optional env file loading.
 
 ## Dependencies
 
-```
-fastmcp, httpx, beautifulsoup4, vdf
-```
+`fastmcp, httpx, vdf`
 
 Python 3.11+.

@@ -1,12 +1,16 @@
-from bazzite_mcp.cache.docs_cache import DocsCache
-from bazzite_mcp.resources import get_server_info, get_system_overview
+from bazzite_mcp.resources import (
+    get_install_policy,
+    get_knowledge_index,
+    get_server_info,
+    get_system_overview,
+)
 
 
 def test_server_info_contains_metadata():
     result = get_server_info()
     assert "bazzite-mcp" in result
-    assert "Cache TTL" in result
-    assert "Cached pages" in result
+    assert "Docs mode" in result
+    assert "Official docs" in result
 
 
 def test_system_overview_contains_system_data():
@@ -14,24 +18,14 @@ def test_system_overview_contains_system_data():
     assert result.strip()
 
 
-def test_server_info_reads_existing_read_only_cache(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    cache = DocsCache()
-    cache.store_page(
-        url="https://docs.bazzite.gg/test",
-        title="Test Page",
-        content="Docs content",
-        section="Test",
-    )
-    cache.close()
+def test_knowledge_index_contains_resources_and_sources() -> None:
+    result = get_knowledge_index()
+    assert "bazzite://knowledge/install-policy" in result
+    assert "bazzite://knowledge/troubleshooting" in result
+    assert "https://docs.bazzite.gg" in result
 
-    db_path = tmp_path / "bazzite-mcp" / "docs_cache.db"
-    db_path.chmod(0o444)
-    db_path.parent.chmod(0o555)
-    try:
-        result = get_server_info()
-    finally:
-        db_path.parent.chmod(0o755)
-        db_path.chmod(0o644)
 
-    assert "Cached pages: 1" in result
+def test_install_policy_resource_contains_heading() -> None:
+    result = get_install_policy()
+    assert result.startswith("# Install Policy")
+    assert "rpm-ostree" in result

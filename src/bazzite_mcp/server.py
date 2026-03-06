@@ -3,9 +3,14 @@ import importlib
 from fastmcp import FastMCP
 
 from bazzite_mcp.resources import (
-    get_docs_index,
+    get_dev_environments,
+    get_game_optimization,
+    get_install_policy,
+    get_knowledge_index,
     get_server_info,
     get_system_overview,
+    get_tool_routing,
+    get_troubleshooting,
 )
 
 mcp = FastMCP(
@@ -50,10 +55,35 @@ mcp.resource(
     mime_type="text/markdown",
 )(get_system_overview)
 mcp.resource(
-    "bazzite://docs/index",
-    description="Index of all cached documentation pages with sections and URLs",
+    "bazzite://knowledge/index",
+    description="Index of built-in Bazzite knowledge resources and official sources",
     mime_type="text/markdown",
-)(get_docs_index)
+)(get_knowledge_index)
+mcp.resource(
+    "bazzite://knowledge/install-policy",
+    description="Bazzite-native install policy guidance",
+    mime_type="text/markdown",
+)(get_install_policy)
+mcp.resource(
+    "bazzite://knowledge/tool-routing",
+    description="Map tasks to MCP execution versus skill reasoning",
+    mime_type="text/markdown",
+)(get_tool_routing)
+mcp.resource(
+    "bazzite://knowledge/troubleshooting",
+    description="Troubleshooting guidance for common Bazzite host issues",
+    mime_type="text/markdown",
+)(get_troubleshooting)
+mcp.resource(
+    "bazzite://knowledge/dev-environments",
+    description="Guidance for host, container, and VM development environments",
+    mime_type="text/markdown",
+)(get_dev_environments)
+mcp.resource(
+    "bazzite://knowledge/game-optimization",
+    description="Gaming and optimization guidance for Bazzite systems",
+    mime_type="text/markdown",
+)(get_game_optimization)
 mcp.resource(
     "bazzite://server/info",
     description="bazzite-mcp server metadata: config, cache status, versions",

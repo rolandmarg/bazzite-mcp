@@ -12,7 +12,7 @@ Use this map to decide which tasks belong to MCP execution and which belong to s
 - VM lifecycle management
 - desktop screenshots and automation
 - Steam library lookup and settings mutation
-- docs cache search and changelog retrieval
+- built-in knowledge lookup and official docs/release pointers
 - audit log query and rollback
 
 ## Skill-first tasks

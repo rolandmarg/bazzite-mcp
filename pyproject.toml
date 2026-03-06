@@ -9,7 +9,6 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "beautifulsoup4>=4.14.3",
     "fastmcp>=3.1.0",
     "httpx>=0.28.1",
     "vdf>=3.4",
@@ -22,7 +21,6 @@ Issues = "https://github.com/rolandmarg/bazzite-mcp/issues"
 
 [project.scripts]
 bazzite-mcp = "bazzite_mcp.__main__:main"
-bazzite-mcp-refresh = "bazzite_mcp.refresh:main"
 bazzite-mcp-cleanup = "bazzite_mcp.cleanup:main"
 
 [build-system]

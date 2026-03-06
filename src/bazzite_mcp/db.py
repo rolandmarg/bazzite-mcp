@@ -43,43 +43,6 @@ CREATE TABLE IF NOT EXISTS actions (
 
 
 CACHE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS pages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT NOT NULL UNIQUE,
-    title TEXT,
-    content TEXT,
-    section TEXT,
-    fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
-    title, content, section, content='pages', content_rowid='id'
-);
-
-CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
-    INSERT INTO pages_fts(rowid, title, content, section)
-    VALUES (new.id, new.title, new.content, new.section);
-END;
-
-CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
-    INSERT INTO pages_fts(pages_fts, rowid, title, content, section)
-    VALUES ('delete', old.id, old.title, old.content, old.section);
-END;
-
-CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE ON pages BEGIN
-    INSERT INTO pages_fts(pages_fts, rowid, title, content, section)
-    VALUES ('delete', old.id, old.title, old.content, old.section);
-    INSERT INTO pages_fts(rowid, title, content, section)
-    VALUES (new.id, new.title, new.content, new.section);
-END;
-
-CREATE TABLE IF NOT EXISTS changelogs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    version TEXT NOT NULL UNIQUE,
-    date TEXT,
-    body TEXT
-);
-
 CREATE TABLE IF NOT EXISTS game_reports (
     app_id INTEGER PRIMARY KEY,
     protondb_summary TEXT,

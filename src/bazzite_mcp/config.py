@@ -54,32 +54,20 @@ def _load_env_file() -> None:
 
 @dataclass
 class Config:
-    # Docs cache
-    cache_ttl_days: int = 7
-    cache_ttl_hours: int | None = 12
     docs_base_url: str = "https://docs.bazzite.gg"
-    github_releases_url: str = "https://api.github.com/repos/ublue-os/bazzite/releases"
-    crawl_max_pages: int = 100
+    github_releases_url: str = "https://github.com/ublue-os/bazzite/releases"
 
     # Audit
     audit_output_max_chars: int = 2000
 
     def validate(self) -> None:
-        if self.cache_ttl_days < 0:
-            raise ValueError("cache_ttl_days must be non-negative")
-        if self.cache_ttl_hours is not None and self.cache_ttl_hours < 0:
-            raise ValueError("cache_ttl_hours must be non-negative")
-        if self.crawl_max_pages < 1:
-            raise ValueError("crawl_max_pages must be positive")
+        if not self.docs_base_url:
+            raise ValueError("docs_base_url must not be empty")
+        if not self.github_releases_url:
+            raise ValueError("github_releases_url must not be empty")
 
     def __post_init__(self) -> None:
         self.validate()
-
-    def cache_ttl_seconds(self) -> int:
-        if self.cache_ttl_hours is not None and self.cache_ttl_hours > 0:
-            return self.cache_ttl_hours * 3600
-        return self.cache_ttl_days * 24 * 3600
-
 
 _config: Config | None = None
 
@@ -94,13 +82,6 @@ def load_config() -> Config:
     cfg = Config()
     path = _config_path()
 
-    # Env vars override config file
-    env_overrides = {
-        "BAZZITE_MCP_CACHE_TTL_HOURS": "cache_ttl_hours",
-        "BAZZITE_MCP_CACHE_TTL": "cache_ttl_days",
-        "BAZZITE_MCP_CRAWL_MAX": "crawl_max_pages",
-    }
-
     if path.exists():
         try:
             with open(path, "rb") as f:
@@ -112,20 +93,8 @@ def load_config() -> Config:
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
 
-    for env_key, attr in env_overrides.items():
-        val = os.environ.get(env_key)
-        if val is not None:
-            field_type = type(getattr(cfg, attr))
-            try:
-                setattr(cfg, attr, field_type(val))
-            except (ValueError, TypeError):
-                pass  # Ignore invalid env var values, keep default
-
     cfg.validate()
-    logger.debug(
-        "Loaded bazzite-mcp config: crawl_max=%s",
-        cfg.crawl_max_pages,
-    )
+    logger.debug("Loaded bazzite-mcp config")
 
     _config = cfg
     return cfg

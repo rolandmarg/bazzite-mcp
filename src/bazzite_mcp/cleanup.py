@@ -1,7 +1,7 @@
 """Clean uninstall utility for bazzite-mcp.
 
 Removes all data created by the server:
-- Docs cache database
+- Local cache database
 - Audit log database
 - Config files (optional)
 

@@ -13,3 +13,5 @@ def test_server_resources_exclude_policy_uris() -> None:
     uris = {str(resource.uri) for resource in resources}
     assert "bazzite://install/hierarchy" not in uris
     assert "bazzite://install/policy" not in uris
+    assert "bazzite://knowledge/index" in uris
+    assert "bazzite://knowledge/install-policy" in uris
